@@ -10,8 +10,9 @@ finite-dimensional space `W` of functions on `[0, ∞)`.
 
 * Translation by `t` maps `W` to itself; in a basis of `W` it is a matrix `M t`, with
   `M (s + t) = M s * M t` and `M 0 = 1`.
-* The functions in `W` are continuous, and finitely many evaluations determine them, so the
-  coordinates, and `M`, depend continuously on `t`. Hence `M t = exp (t A)`.
+* In the pointwise topology on `W`, translation orbits are continuous because the functions in
+  `W` are continuous. Finite dimensionality makes the coordinates continuous, so `M` is continuous
+  and hence `M t = exp (t A)`.
 * `φ t` is a fixed linear functional of `M t` applied to a fixed vector. Splitting the vector into
   generalized eigenvectors of `A`, each piece contributes `exp (μ t)` times a polynomial in `t`.
 * Conjugate pairing then regroups the sum into components.
@@ -72,35 +73,6 @@ lemma continuous_of_mem_translateSpan {φ : ℝ → ℝ} (hφ : ContinuousOn φ 
   | add x y _ _ hx hy => exact hx.add hy
   | smul a x _ hx => exact continuous_const.mul hx
 
-/-- Evaluation of the functions in the span at a finite set of points. -/
-noncomputable def evalAt (F : Finset ℝ≥0) : translateSpan φ →ₗ[ℝ] (F → ℝ) :=
-  LinearMap.pi fun u : F => (LinearMap.proj (u : ℝ≥0)).comp (translateSpan φ).subtype
-
-lemma mem_ker_evalAt {F : Finset ℝ≥0} {g : translateSpan φ} :
-    g ∈ LinearMap.ker (evalAt φ F) ↔ ∀ u ∈ F, (g : ℝ≥0 → ℝ) u = 0 := by
-  simp [evalAt, funext_iff]
-
-/-- Finitely many points determine the functions in a finite-dimensional span. -/
-lemma exists_evalAt_injective [FiniteDimensional ℝ (translateSpan φ)] :
-    ∃ F : Finset ℝ≥0, LinearMap.ker (evalAt φ F) = ⊥ := by
-  classical
-  obtain ⟨F, -, hF⟩ := (measure fun F : Finset ℝ≥0 =>
-    Module.finrank ℝ (LinearMap.ker (evalAt φ F))).wf.has_min Set.univ ⟨∅, Set.mem_univ _⟩
-  refine ⟨F, (Submodule.eq_bot_iff _).mpr fun g hg => ?_⟩
-  by_contra hne
-  obtain ⟨u, hu⟩ : ∃ u, (g : ℝ≥0 → ℝ) u ≠ 0 := by
-    by_contra hall
-    push Not at hall
-    exact hne (Subtype.ext (funext hall))
-  have hlt : LinearMap.ker (evalAt φ (insert u F)) < LinearMap.ker (evalAt φ F) := by
-    refine lt_of_le_of_ne (fun h hh => ?_) fun heq => ?_
-    · rw [mem_ker_evalAt] at hh ⊢
-      exact fun v hv => hh v (Finset.mem_insert_of_mem hv)
-    · have : g ∈ LinearMap.ker (evalAt φ (insert u F)) := heq ▸ hg
-      rw [mem_ker_evalAt] at this
-      exact hu (this u (Finset.mem_insert_self u F))
-  exact hF (insert u F) (Set.mem_univ _) (Submodule.finrank_lt_finrank_of_lt hlt)
-
 /-! ### The matrix semigroup -/
 
 section Matrix
@@ -127,18 +99,10 @@ lemma shiftMatrix_add {s t : ℝ} (hs : 0 ≤ s) (ht : 0 ≤ t) :
 /-- The coordinates of a translate depend continuously on the translation. -/
 lemma continuous_repr_shiftW (hφ : ContinuousOn φ (Set.Ici 0)) (g : translateSpan φ) (i) :
     Continuous fun t : ℝ => (basisW φ).repr (shiftW φ t.toNNReal g) i := by
-  obtain ⟨F, hF⟩ := exists_evalAt_injective φ
-  obtain ⟨L, hL⟩ := LinearMap.exists_leftInverse_of_injective (evalAt φ F) hF
-  have hrepr : ∀ h : translateSpan φ,
-      (basisW φ).repr h i = ((basisW φ).coord i ∘ₗ L) (evalAt φ F h) := by
-    intro h
-    have := LinearMap.congr_fun hL h
-    simp only [LinearMap.comp_apply, LinearMap.id_apply] at this
-    simp [this]
-  simp only [hrepr]
-  refine (LinearMap.continuous_of_finiteDimensional _).comp (continuous_pi fun u => ?_)
-  simp only [evalAt, LinearMap.pi_apply, LinearMap.comp_apply, Submodule.subtype_apply,
-    LinearMap.proj_apply, shiftW_apply]
+  apply ((basisW φ).coord i).continuous_of_finiteDimensional.comp
+  apply Continuous.subtype_mk
+  refine continuous_pi fun u => ?_
+  change Continuous fun t : ℝ => (g : ℝ≥0 → ℝ) (u + t.toNNReal)
   exact (continuous_of_mem_translateSpan hφ g.2).comp (continuous_const.add continuous_real_toNNReal)
 
 lemma continuous_shiftMatrix (hφ : ContinuousOn φ (Set.Ici 0)) : Continuous (shiftMatrix φ) := by

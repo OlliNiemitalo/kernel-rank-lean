@@ -6,12 +6,15 @@ import Mathlib
 If `M : ℝ → 𝔸`, in a Banach algebra, is continuous on `[0, ∞)` with `M 0 = 1` and
 `M (s + t) = M s * M t`, then `M t = exp (t A)` for some `A`.
 
-The averages `N = ∫ s in 0..δ, M s` are close to `δ • 1`, hence invertible, for small `δ`. Since
+The normalized averages `δ⁻¹ • ∫ s in 0..δ, M s` tend to `1` by the fundamental theorem of
+calculus, hence are invertible for small positive `δ` because the units form an open set. Since
 `M t * N = ∫ s in t..t + δ, M s`, the right side shows that `M` is differentiable with
 `M' t = M t * A`, `A = δ⁻¹ • (M δ - 1) * N'⁻¹`. Then `M t * exp (-t A)` has zero derivative.
 -/
 
-open NormedSpace Set
+open Filter NormedSpace Set
+
+open scoped Topology
 
 namespace KernelRank
 
@@ -27,35 +30,14 @@ theorem exists_eq_exp_of_semigroup (M : ℝ → 𝔸) (hcont : ContinuousOn M (I
   have hM'c : Continuous M' :=
     hcont.comp_continuous (continuous_id.max continuous_const) fun s => le_max_right s 0
   have hM'eq : ∀ s, 0 ≤ s → M' s = M s := fun s hs => by simp [M', max_eq_left hs]
-  -- A short averaging window on which `M` stays close to `1`.
-  obtain ⟨δ, hδ, hclose⟩ : ∃ δ > 0, ∀ s, 0 ≤ s → s ≤ δ → ‖M s - 1‖ ≤ 1 / 2 := by
-    obtain ⟨ε, hε, hball⟩ :=
-      Metric.continuousWithinAt_iff.mp (hcont 0 self_mem_Ici) (1 / 2) (by norm_num)
-    refine ⟨ε / 2, by positivity, fun s hs hsδ => ?_⟩
-    have := @hball s (mem_Ici.mpr hs) (by rw [Real.dist_eq, sub_zero, abs_of_nonneg hs]; linarith)
-    rw [dist_eq_norm, h0] at this
-    exact this.le
+  have havg : Tendsto (fun δ : ℝ => δ⁻¹ • ∫ s in (0)..δ, M' s)
+      (𝓝[>] 0) (𝓝 (1 : 𝔸)) := by
+    simpa [hM'eq 0 le_rfl, h0] using
+      (hM'c.integral_hasStrictDerivAt 0 0).hasDerivAt.tendsto_slope_zero_right
+  have hpos : ∀ᶠ δ : ℝ in 𝓝[>] 0, 0 < δ := self_mem_nhdsWithin
+  obtain ⟨δ, hδ, u, hu⟩ :=
+    (hpos.and (havg.eventually (Units.isOpen.mem_nhds isUnit_one))).exists
   set N : 𝔸 := ∫ s in (0)..δ, M' s with hN
-  -- `δ⁻¹ • N` is close to `1`, hence invertible.
-  have hNclose : ‖1 - δ⁻¹ • N‖ ≤ 1 / 2 := by
-    have hint : ∫ s in (0)..δ, (M' s - 1) = N - δ • 1 := by
-      rw [intervalIntegral.integral_sub (hM'c.intervalIntegrable _ _) intervalIntegrable_const,
-        intervalIntegral.integral_const, sub_zero]
-    have hbound : ‖∫ s in (0)..δ, (M' s - 1)‖ ≤ 1 / 2 * |δ - 0| := by
-      apply intervalIntegral.norm_integral_le_of_norm_le_const
-      intro s hs
-      rw [uIoc_of_le hδ.le] at hs
-      rw [hM'eq s hs.1.le]
-      exact hclose s hs.1.le hs.2
-    rw [hint, sub_zero, abs_of_pos hδ] at hbound
-    have : 1 - δ⁻¹ • N = -(δ⁻¹ • (N - δ • 1)) := by
-      rw [smul_sub, smul_smul, inv_mul_cancel₀ hδ.ne', one_smul]
-      abel
-    rw [this, norm_neg, norm_smul, Real.norm_eq_abs, abs_inv, abs_of_pos hδ]
-    calc δ⁻¹ * ‖N - δ • 1‖ ≤ δ⁻¹ * (1 / 2 * δ) := by gcongr
-      _ = 1 / 2 := by field_simp
-  let u : 𝔸ˣ := Units.oneSub (1 - δ⁻¹ • N) (by linarith [hNclose])
-  have hu : (u : 𝔸) = δ⁻¹ • N := sub_sub_cancel 1 _
   let A : 𝔸 := δ⁻¹ • ((M δ - 1) * ↑u⁻¹)
   -- `M x * N` is the integral of `M` over `[x, x + δ]`.
   have hF : ∀ x, 0 ≤ x →
