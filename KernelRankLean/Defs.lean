@@ -18,12 +18,12 @@ open Complex Polynomial
 namespace KernelRank
 
 /-- `K` is a sum of `N` products of a function of `x` and a function of `y`. -/
-def IsSumOfProducts (K : ℝ → ℝ → ℝ) (N : ℕ) : Prop :=
-  ∃ h v : Fin N → ℝ → ℝ, ∀ x y, K x y = ∑ n, h n x * v n y
+def IsSumOfProducts {𝕜 X Y : Type*} [CommSemiring 𝕜] (K : X → Y → 𝕜) (N : ℕ) : Prop :=
+  ∃ (h : Fin N → X → 𝕜) (v : Fin N → Y → 𝕜), ∀ x y, K x y = ∑ n, h n x * v n y
 
 /-- The separable rank of `K`: the least `N` for which `K` is a sum of `N` products,
 or `⊤` if there is no such `N`. -/
-noncomputable def separableRank (K : ℝ → ℝ → ℝ) : ℕ∞ :=
+noncomputable def separableRank {𝕜 X Y : Type*} [CommSemiring 𝕜] (K : X → Y → 𝕜) : ℕ∞ :=
   ⨅ (N : ℕ) (_ : IsSumOfProducts K N), (N : ℕ∞)
 
 /-- A component of a profile: a rate `λ` and a polynomial `P`, with values

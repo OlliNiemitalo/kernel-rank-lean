@@ -1,263 +1,104 @@
-import KernelRankLean.Translations
-import KernelRankLean.ProductRank
-import KernelRankLean.RealExpPoly
+import KernelRankLean.ComplexRank
+import KernelRankLean.Complexification
 
 /-!
 # Sufficiency: a sum of components has separable rank equal to its cost
 
-For a component with rate `λ` and polynomial `P` of degree `m - 1`, Taylor expansion gives
-`P(u + t) exp (λ (u + t)) = ∑ k < m, (u ^ k exp (λ u)) · (Q k (t) exp (λ t))` with `Q k` the `k`-th
-Hasse derivative of `P`, of degree `m - 1 - k`. Taking real parts,
-
-  `Re (P(u + t) exp (λ (u + t))) = ∑ k, Re z k (u) · Re w k (t) - Im z k (u) · Im w k (t)`
-
-with `z k (u) = u ^ k exp (λ u)` and `w k (t) = Q k (t) exp (λ t)`. For a real rate the imaginary
-parts vanish. So the translates `u ↦ φ (u + t)` of a profile `φ` are sums of products of the
-functions `Re z`, `Im z` of `u` and `Re w`, `- Im w` of `t`; both families are linearly
-independent: the injective coefficient synthesis map transports independence of the monomials and
-of the Hasse derivatives (which have distinct degrees). Thus the translates span a space of
-dimension equal to the number of terms:
-`m` per real rate and `2 m` per complex one.
+Expand every nonreal component into two complex exponential polynomials at conjugate rates.
+Real rates contribute one polynomial, with real coefficients. The complex exact-rank theorem
+counts their multiplicities, and complexification preserves the real kernel's rank. Thus a real
+rate of multiplicity `m` costs `m` terms, and a nonreal rate costs `2 m`.
 -/
 
 open Complex Polynomial NNReal
 
 namespace KernelRank
 
-/-! ### Exponential polynomials: linearity and Taylor expansion -/
-
-lemma expPoly_sum {κ : Type*} (S : Finset κ) (Q : κ → ℂ[X]) (μ : ℂ) (u : ℝ) :
-    expPoly (∑ k ∈ S, Q k) μ u = ∑ k ∈ S, expPoly (Q k) μ u := by
-  simp [expPoly, eval_finsetSum, Finset.sum_mul]
-
-lemma expPoly_X_pow (k : ℕ) (μ : ℂ) (u : ℝ) : expPoly (X ^ k) μ u = (u : ℂ) ^ k * exp (μ * u) := by
-  simp [expPoly]
-
-/-- For a real rate, `u ^ k exp (μ u)` is real. -/
-lemma im_expPoly_X_pow {μ : ℂ} (hμ : μ.im = 0) (k : ℕ) (u : ℝ) : (expPoly (X ^ k) μ u).im = 0 := by
-  have : μ = (μ.re : ℂ) := Complex.ext (by simp) (by simp [hμ])
-  rw [expPoly_X_pow, this, ← Complex.ofReal_mul, ← Complex.ofReal_exp, ← Complex.ofReal_pow,
-    ← Complex.ofReal_mul, Complex.ofReal_im]
-
-/-- Taylor expansion of a translated exponential polynomial. -/
-lemma expPoly_translate {P : ℂ[X]} {m : ℕ} (hm : P.natDegree < m) (μ : ℂ) (u t : ℝ) :
-    expPoly P μ (u + t) =
-      ∑ k : Fin m, expPoly (X ^ (k : ℕ)) μ u * expPoly (hasseDeriv k P) μ t := by
-  have htaylor : P.eval ((u : ℂ) + t) = ∑ k : Fin m, (hasseDeriv k P).eval (t : ℂ) * (u : ℂ) ^ (k : ℕ) := by
-    rw [← taylor_eval, eval_eq_sum_range' (by rwa [natDegree_taylor]), ← Fin.sum_univ_eq_sum_range]
-    simp [taylor_coeff]
-  simp only [expPoly, Complex.ofReal_add, htaylor, eval_pow, eval_X, Finset.sum_mul]
-  refine Finset.sum_congr rfl fun k _ => ?_
-  rw [mul_add, Complex.exp_add]
-  ring
-
-/-! ### The triangular family of Hasse derivatives -/
-
-/-- The Hasse derivatives of a nonzero polynomial are independent: their degrees are distinct. -/
-lemma linearIndependent_hasseDeriv {P : ℂ[X]} (hP : P ≠ 0) :
-    LinearIndependent ℂ (fun k : Fin (P.natDegree + 1) => hasseDeriv k P) := by
-  classical
-  rw [Fintype.linearIndependent_iff]
-  intro c h
-  simp only [smul_eq_C_mul] at h
-  by_contra hne
-  obtain ⟨k₀, hk₀, hmin'⟩ :=
-    wellFounded_lt.has_min {k | c k ≠ 0} (by simpa [Set.Nonempty] using not_forall.mp hne)
-  have hmin : ∀ k, k < k₀ → c k = 0 := fun k hk => by
-    by_contra hck
-    exact hmin' k hck hk
-  have hcoeff := congrArg (fun Q => Q.coeff (P.natDegree - k₀)) h
-  simp only [finsetSum_coeff, coeff_C_mul, hasseDeriv_coeff, coeff_zero] at hcoeff
-  have hk : P.natDegree - (k₀ : ℕ) + k₀ = P.natDegree :=
-    Nat.sub_add_cancel (Nat.lt_succ_iff.mp k₀.2)
-  rw [Finset.sum_eq_single k₀] at hcoeff
-  · rw [hk, ← leadingCoeff] at hcoeff
-    have hchoose : ((P.natDegree.choose k₀ : ℕ) : ℂ) ≠ 0 :=
-      Nat.cast_ne_zero.mpr (Nat.choose_pos (Nat.lt_succ_iff.mp k₀.2)).ne'
-    exact mul_ne_zero hk₀ (mul_ne_zero hchoose (leadingCoeff_ne_zero.mpr hP)) hcoeff
-  · intro k _ hk'
-    rcases lt_or_gt_of_ne hk' with hlt | hgt
-    · simp [hmin k hlt]
-    · have hk₀k : (k₀ : ℕ) < k := hgt
-      have hdeg : P.natDegree < P.natDegree - k₀ + k := by have := k₀.2; omega
-      rw [coeff_eq_zero_of_natDegree_lt hdeg]
-      simp
-  · simp
-
-/-! ### A family of components -/
-
-section Family
-
-open scoped Classical
-
-variable {ι : Type*} [Fintype ι] (comp : ι → Component)
-
 /-- The profile of a family of components. -/
-noncomputable def familyProfile (s : ℝ) : ℝ :=
+noncomputable def familyProfile {ι : Type*} [Fintype ι] (comp : ι → Component) (s : ℝ) : ℝ :=
   ∑ i, (comp i).eval s
 
-/-- The rendering terms of a family: `m × 2` for each complex rate, `m` for each real one. -/
-abbrev TermIndex :=
-  (Σ i : {i // (comp i).rate.im ≠ 0}, Fin (comp i).multiplicity × Fin 2) ⊕
-    (Σ i : {i // (comp i).rate.im = 0}, Fin (comp i).multiplicity)
-
-/-- `z i k u = u ^ k exp (λ u)`: the functions of `u`. -/
-noncomputable def zFun (i : ι) (k : ℕ) (u : ℝ) : ℂ := expPoly (X ^ k) (comp i).rate u
-
-/-- `w i k t = Q k (t) exp (λ t)` with `Q k` the `k`-th Hasse derivative: the functions of `t`. -/
-noncomputable def wFun (i : ι) (k : ℕ) (t : ℝ) : ℂ := expPoly (hasseDeriv k (comp i).poly) (comp i).rate t
-
-/-- The rendering terms' functions of `u`: `Re z`, `Im z` for complex rates, `Re z` for real ones. -/
-noncomputable def uFactor : TermIndex comp → ℝ≥0 → ℝ :=
-  Sum.elim (fun j u => if j.2.2 = 0 then (zFun comp j.1 j.2.1 u).re else (zFun comp j.1 j.2.1 u).im)
-    (fun j u => (zFun comp j.1 j.2 u).re)
-
-/-- The rendering terms' functions of `t`: `Re w`, `- Im w` for complex rates, `Re w` for real
-ones. -/
-noncomputable def tFactor : TermIndex comp → ℝ≥0 → ℝ :=
-  Sum.elim (fun j t => if j.2.2 = 0 then (wFun comp j.1 j.2.1 t).re else -(wFun comp j.1 j.2.1 t).im)
-    (fun j t => (wFun comp j.1 j.2 t).re)
-
-omit [Fintype ι] in
-/-- A component's translate as a sum of products. -/
-theorem eval_translate (i : ι) (u t : ℝ) :
-    (comp i).eval (u + t) = ∑ k : Fin (comp i).multiplicity,
-      ((zFun comp i k u).re * (wFun comp i k t).re - (zFun comp i k u).im * (wFun comp i k t).im) := by
-  change (expPoly (comp i).poly (comp i).rate (u + t)).re = _
-  rw [expPoly_translate (Nat.lt_succ_self _), Complex.re_sum]
-  rfl
-
-/-- The translates of a family's profile are sums of products of the two factor families. -/
-lemma familyProfile_translate (t : ℝ≥0) :
-    (fun u : ℝ≥0 => familyProfile comp (u + t)) = ∑ j, tFactor comp j t • uFactor comp j := by
-  funext u
-  simp only [Finset.sum_apply, Pi.smul_apply, smul_eq_mul, familyProfile]
-  rw [← Fintype.sum_subtype_add_sum_subtype (fun i => (comp i).rate.im = 0), add_comm,
-    Fintype.sum_sum_type, Fintype.sum_sigma, Fintype.sum_sigma]
-  congr 1
-  · refine Finset.sum_congr rfl fun i _ => ?_
-    rw [eval_translate, Fintype.sum_prod_type]
-    refine Finset.sum_congr rfl fun k _ => ?_
-    simp [Fin.sum_univ_two, tFactor, uFactor]
-    ring
-  · refine Finset.sum_congr rfl fun i _ => ?_
-    rw [eval_translate]
-    refine Finset.sum_congr rfl fun k _ => ?_
-    simp only [tFactor, uFactor, Sum.elim_inr, zFun, im_expPoly_X_pow i.2, zero_mul, sub_zero]
-    ring
-
-variable {comp}
-
-/-- Real and scaled imaginary parts of a family of exponential polynomials. -/
-noncomputable def expPolyFactors (Q : ∀ i, Fin (comp i).multiplicity → ℂ[X]) (σ : ℝ) :
-    TermIndex comp → ℝ≥0 → ℝ :=
-  Sum.elim (fun j u => if j.2.2 = 0 then (expPoly (Q j.1 j.2.1) (comp j.1).rate u).re
-    else σ * (expPoly (Q j.1 j.2.1) (comp j.1).rate u).im)
-    (fun j u => (expPoly (Q j.1 j.2) (comp j.1).rate u).re)
-
-omit [Fintype ι] in
-/-- Injective synthesis transports independence of polynomial families to their real factors. -/
-lemma linearIndependent_expPolyFactors [Finite ι]
-    (hinj : Function.Injective fun i => (comp i).rate)
-    (hup : ∀ i, 0 ≤ (comp i).rate.im)
-    (Q : ∀ i, Fin (comp i).multiplicity → ℂ[X])
-    (hQ : ∀ i, LinearIndependent ℂ (Q i))
-    (hreal : ∀ i, (comp i).rate.im = 0 → ∀ k n, ((Q i k).coeff n).im = 0)
-    (σ : ℝ) (hσ : σ ≠ 0) : LinearIndependent ℝ (expPolyFactors Q σ) := by
-  letI := Fintype.ofFinite ι
-  rw [Fintype.linearIndependent_iff]
-  intro g hg
-  let c : ∀ i, Fin (comp i).multiplicity → ℂ := fun i k =>
-    if h : (comp i).rate.im = 0 then (g (Sum.inr ⟨⟨i, h⟩, k⟩) : ℂ)
-    else (g (Sum.inl ⟨⟨i, h⟩, k, 0⟩) : ℂ) -
-      I * (σ * g (Sum.inl ⟨⟨i, h⟩, k, 1⟩) : ℝ)
-  let A : ι → ℂ[X] := fun i => ∑ k, C (c i k) * Q i k
-  have hAr : A ∈ realCoefficientFamilies (fun i => (comp i).rate) := by
-    intro i hi n
-    simp only [A, finsetSum_coeff, coeff_C_mul, Complex.im_sum]
-    exact Finset.sum_eq_zero fun k _ => by simp [c, hi, Complex.mul_im, hreal i hi k n]
-  have hA : realExpPolySynthesis (fun i => (comp i).rate) ⟨A, hAr⟩ = 0 := by
-    ext u
-    change ∑ i, (expPoly (A i) (comp i).rate u).re = 0
-    have := congrFun hg u
-    erw [Finset.sum_apply] at this
-    replace this : ∑ j, g j * expPolyFactors Q σ j u = 0 := this
-    rw [← this, Fintype.sum_sum_type, Fintype.sum_sigma, Fintype.sum_sigma,
-      ← Fintype.sum_subtype_add_sum_subtype (fun i => (comp i).rate.im = 0), add_comm]
-    congr 1
-    · refine Finset.sum_congr rfl fun i _ => ?_
-      rw [Fintype.sum_prod_type]
-      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
-      refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, Fin.sum_univ_two, expPolyFactors, Complex.mul_re]
-      ring
-    · refine Finset.sum_congr rfl fun i _ => ?_
-      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
-      refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, expPolyFactors]
-  have hA0 : (⟨A, hAr⟩ : realCoefficientFamilies (fun i => (comp i).rate)) = 0 :=
-    realExpPolySynthesis_injective _ hinj hup (hA.trans (map_zero _).symm)
-  have hc : ∀ i k, c i k = 0 := fun i =>
-    Fintype.linearIndependent_iff.mp (hQ i) (c i)
-      (by simpa only [A, smul_eq_C_mul, Submodule.coe_zero, Pi.zero_apply] using
-        congrFun (congrArg Subtype.val hA0) i)
-  rintro (⟨⟨i, hi⟩, k, p⟩ | ⟨⟨i, hi⟩, k⟩)
-  · fin_cases p
-    · simpa [c, hi] using congrArg Complex.re (hc i k)
-    · simpa [c, hi, mul_eq_zero, hσ] using congrArg Complex.im (hc i k)
-  · simpa [c, hi] using hc i k
-
-/-- The functions `Re z`, `Im z` of `u` are linearly independent. -/
-lemma linearIndependent_uFactor (hinj : Function.Injective fun i => (comp i).rate)
-    (hup : ∀ i, 0 ≤ (comp i).rate.im) : LinearIndependent ℝ (uFactor comp) := by
-  have hQ (i : ι) :
-      LinearIndependent ℂ (fun k : Fin (comp i).multiplicity => (X : ℂ[X]) ^ (k : ℕ)) := by
-    simpa only [Function.comp_def, Submodule.subtype_apply, degreeLT.basis_val] using
-      (degreeLT.basis ℂ (comp i).multiplicity).linearIndependent.map'
-        (degreeLT ℂ (comp i).multiplicity).subtype (by simp)
-  simpa only [expPolyFactors, uFactor, zFun, one_mul] using
-    linearIndependent_expPolyFactors hinj hup _ hQ
-      (fun _ _ _ _ => by simp [apply_ite]) 1 one_ne_zero
-
-/-- The functions `Re w`, `- Im w` of `t` are linearly independent. -/
-lemma linearIndependent_tFactor (hinj : Function.Injective fun i => (comp i).rate)
-    (hwf : ∀ i, (comp i).WellFormed) : LinearIndependent ℝ (tFactor comp) := by
-  have hQ (i : ι) :
-      LinearIndependent ℂ (fun k : Fin (comp i).multiplicity => hasseDeriv k (comp i).poly) := by
-    exact linearIndependent_hasseDeriv (hwf i).1
-  simpa only [expPolyFactors, tFactor, wFun, neg_one_mul] using
-    linearIndependent_expPolyFactors hinj (fun i => (hwf i).2.1) _ hQ
-      (fun i hi k n => by simp [hasseDeriv_coeff, (hwf i).2.2 hi]) (-1) (by norm_num)
-
-/-- The number of rendering terms of a family is its total cost. -/
-lemma card_termIndex : Fintype.card (TermIndex comp) = ∑ i, (comp i).cost := by
-  rw [← Fintype.sum_subtype_add_sum_subtype (fun i => (comp i).rate.im = 0), add_comm]
-  simp only [TermIndex, Fintype.card_sum, Fintype.card_sigma, Fintype.card_prod, Fintype.card_fin]
-  congr 1
-  · refine Finset.sum_congr rfl fun i _ => ?_
-    simp [Component.cost, i.2, mul_comm]
-  · refine Finset.sum_congr rfl fun i _ => ?_
-    simp [Component.cost, i.2]
-
-/-- The translates of a well-formed family's profile, with distinct rates, span a space of
-dimension equal to the family's total cost. -/
-theorem finrank_translateSpan_familyProfile (hinj : Function.Injective fun i => (comp i).rate)
-    (hwf : ∀ i, (comp i).WellFormed) :
+/-- Conjugate expansion and complexification give the exact real translate-span dimension. -/
+theorem finrank_translateSpan_familyProfile {ι : Type*} [Fintype ι] {comp : ι → Component}
+    (hinj : Function.Injective fun i => (comp i).rate) (hwf : ∀ i, (comp i).WellFormed) :
     FiniteDimensional ℝ (translateSpan (familyProfile comp)) ∧
       Module.finrank ℝ (translateSpan (familyProfile comp)) = ∑ i, (comp i).cost := by
-  have hG : ∀ t : ℝ≥0, (fun u : ℝ≥0 => familyProfile comp (u + t)) =
-      ∑ j, tFactor comp j t • uFactor comp j := familyProfile_translate comp
-  have hspan := span_range_eq_of_linearIndependent_coefficients (uFactor comp)
-    (linearIndependent_tFactor hinj hwf) hG
-  refine ⟨?_, ?_⟩
-  · unfold translateSpan
-    rw [hspan]
-    exact FiniteDimensional.span_of_finite ℝ (Set.finite_range _)
-  · unfold translateSpan
-    rw [finrank_span_range_eq_card (linearIndependent_uFactor hinj fun i => (hwf i).2.1)
-      (linearIndependent_tFactor hinj hwf) hG, card_termIndex]
-
-end Family
+  classical
+  let J := {i // 0 < (comp i).rate.im}
+  let ν : ι ⊕ J → ℂ :=
+    Sum.elim (fun i => (comp i).rate) (fun j => starRingEnd ℂ (comp j.1).rate)
+  let P : ι ⊕ J → ℂ[X] := Sum.elim
+    (fun i => if 0 < (comp i).rate.im then C (1 / 2) * (comp i).poly else (comp i).poly)
+    (fun j => C (1 / 2) * conjPoly (comp j.1).poly)
+  have hν : Function.Injective ν :=
+    injective_rates_with_conjugates hinj (fun i => (hwf i).2.1)
+  have hP : ∀ j, P j ≠ 0 := by
+    rintro (i | j)
+    · by_cases hi : 0 < (comp i).rate.im <;> simp [P, hi, (hwf i).1]
+    · simpa [P, conjPoly] using
+        mul_ne_zero (show C (1 / 2 : ℂ) ≠ 0 by norm_num)
+          (Polynomial.map_ne_zero (f := starRingEnd ℂ) (hwf j.1).1)
+  have hdeg : ∀ j, (P j).natDegree = (comp (Sum.elim id Subtype.val j)).poly.natDegree := by
+    rintro (i | j)
+    · by_cases hi : 0 < (comp i).rate.im
+      · simp only [P, Sum.elim_inl, hi, ↓reduceIte, id_eq]
+        exact natDegree_C_mul (by norm_num : (1 / 2 : ℂ) ≠ 0)
+      · simp [P, hi]
+    · simp only [P, Sum.elim_inr, conjPoly,
+        natDegree_C_mul (by norm_num : (1 / 2 : ℂ) ≠ 0),
+        natDegree_map_eq_of_injective (starRingEnd ℂ).injective]
+  have hterm (i : ι) (t : ℝ) :
+      ((comp i).eval t : ℂ) = expPoly (P (Sum.inl i)) (comp i).rate t +
+        if 0 < (comp i).rate.im then
+          expPoly (C (1 / 2) * conjPoly (comp i).poly) (starRingEnd ℂ (comp i).rate) t
+        else 0 := by
+    change ((expPoly (comp i).poly (comp i).rate t).re : ℂ) = _
+    rw [Complex.re_eq_add_conj, conj_expPoly]
+    by_cases hi : 0 < (comp i).rate.im
+    · simp only [P, Sum.elim_inl, hi, ↓reduceIte, expPoly_C_mul]
+      ring
+    · have him : (comp i).rate.im = 0 := le_antisymm (not_lt.mp hi) (hwf i).2.1
+      have hconj : conjPoly (comp i).poly = (comp i).poly := by
+        ext k
+        simpa only [conjPoly, coeff_map] using
+          Complex.conj_eq_iff_im.mpr ((hwf i).2.2 him k)
+      simp only [P, Sum.elim_inl, hi, ↓reduceIte, hconj,
+        Complex.conj_eq_iff_im.mpr him, add_zero]
+      ring
+  have hprof (t : ℝ) :
+      (familyProfile comp t : ℂ) = ∑ j, expPoly (P j) (ν j) t := by
+    simp only [familyProfile, Complex.ofReal_sum, hterm, Finset.sum_add_distrib,
+      Fintype.sum_sum_type, ν, P, Sum.elim_inl, Sum.elim_inr]
+    congr 1
+    rw [← Finset.sum_filter]
+    exact Finset.sum_subtype (Finset.univ.filter (fun i => 0 < (comp i).rate.im))
+      (fun i => by simp)
+      (fun i => expPoly (C (1 / 2) * conjPoly (comp i).poly)
+        (starRingEnd ℂ (comp i).rate) t)
+  have hsub (F : ι → ℕ) :
+      ∑ j : J, F j.1 = ∑ i, if 0 < (comp i).rate.im then F i else 0 := by
+    rw [← Finset.sum_filter]
+    exact (Finset.sum_subtype (Finset.univ.filter (fun i => 0 < (comp i).rate.im))
+      (fun i => by simp) F).symm
+  have hcost : ∑ j, ((P j).natDegree + 1) = ∑ i, (comp i).cost := by
+    simp only [Fintype.sum_sum_type, hdeg, Sum.elim_inl, Sum.elim_inr]
+    rw [hsub (fun i => (comp i).poly.natDegree + 1), ← Finset.sum_add_distrib]
+    refine Finset.sum_congr rfl fun i _ => ?_
+    by_cases hi : 0 < (comp i).rate.im
+    · simp [hi, Component.cost, Component.multiplicity, hi.ne']
+      omega
+    · have him : (comp i).rate.im = 0 := le_antisymm (not_lt.mp hi) (hwf i).2.1
+      simp [him, Component.cost, Component.multiplicity]
+  obtain ⟨hfin, hdim⟩ := finrank_translateSpan_sum_expPoly hν P hP
+  have hcomplex : (fun t => (familyProfile comp t : ℂ)) =
+      fun t => ∑ j, expPoly (P j) (ν j) t := funext hprof
+  rw [← hcomplex] at hfin hdim
+  let : FiniteDimensional ℂ
+      (rowSpan (fun u t : ℝ≥0 => (familyProfile comp (u + t) : ℂ))) := hfin
+  refine ⟨finiteDimensional_rowSpan_ofReal
+    (fun u t : ℝ≥0 => familyProfile comp (u + t)), ?_⟩
+  exact (finrank_rowSpan_ofReal (fun u t : ℝ≥0 => familyProfile comp (u + t))).trans
+    (hdim.trans hcost)
 
 /-- **Sufficiency.** The profile of a representation gives a radial kernel whose separable rank
 is the representation's total cost. -/

@@ -14,8 +14,8 @@ open NNReal
 namespace KernelRank
 
 /-- The span of the translates `u ↦ φ (u + t)`, `t ≥ 0`, of a profile, as functions on `[0, ∞)`. -/
-def translateSpan (φ : ℝ → ℝ) : Submodule ℝ (ℝ≥0 → ℝ) :=
-  Submodule.span ℝ (Set.range fun (t : ℝ≥0) (u : ℝ≥0) => φ (u + t))
+def translateSpan {𝕜 : Type*} [Field 𝕜] (φ : ℝ → 𝕜) : Submodule 𝕜 (ℝ≥0 → 𝕜) :=
+  Submodule.span 𝕜 (Set.range fun (t : ℝ≥0) (u : ℝ≥0) => φ (u + t))
 
 /-- Reading a function on `[0, ∞)` at `x ^ 2`. -/
 def atSquare : (ℝ≥0 → ℝ) →ₗ[ℝ] (ℝ → ℝ) where
