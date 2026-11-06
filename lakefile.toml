@@ -1,7 +1,7 @@
 name = "kernel-rank-lean"
 version = "0.1.0"
 keywords = ["math"]
-defaultTargets = ["KernelRankLean"]
+defaultTargets = ["KernelRankLean", "Experiments"]
 
 [leanOptions]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
@@ -17,3 +17,6 @@ rev = "v4.36.0-rc2"
 
 [[lean_lib]]
 name = "KernelRankLean"
+
+[[lean_lib]]
+name = "Experiments"

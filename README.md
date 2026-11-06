@@ -74,8 +74,10 @@ argument is needed.
 
 ## Commit history and Lean source size
 
-These counts include **every repository-owned `.lean` file**, including the root import
-module and all new helper modules. Physical lines include comments and blank lines;
+These counts include **every `.lean` file of the `KernelRankLean` library**, including its root
+import module and all helper modules. The separate `Experiments` library (see
+[below](#alternative-proofs-of-the-semigroup-step)) is not part of the proof and is counted
+separately there. Physical lines include comments and blank lines;
 nonblank lines include comments but exclude whitespace-only lines. Dependencies, build
 outputs and external scratch files are excluded. Each committed revision is counted from
 its Git contents, not from the current checkout.
@@ -113,6 +115,44 @@ It still has **271 more physical lines than `0d9d939`** (and 247 more than `240d
 Thus it reduces the extended proof, but has not yet made it smaller than the earlier
 classification-only proof.
 
+## Alternative proofs of the semigroup step
+
+One step of the proof shows that a one-parameter semigroup `M`, with `M (s + t) = M s * M t`
+and `M 0 = 1`, that is continuous on `[0, ∞)` is an exponential: `M t = exp (t A)`. Translation
+of the profile is such a semigroup, so this step produces the generator `A`.
+[Semigroup.lean](KernelRankLean/Semigroup.lean) proves it by smoothing with an integral. It
+works in any Banach algebra.
+
+The [Experiments](Experiments) folder holds two other proofs of this step, for
+finite-dimensional algebras. Both start from the same bound: if `M` stays within `1/2` of `1`
+on `[0, δ]`, geometric sums bound the difference quotients `(M h - 1) / h` for `h = δ / n`.
+
+* **Finite differences**
+  ([FiniteDifferenceSemigroup.lean](Experiments/FiniteDifferenceSemigroup.lean)). In finite
+  dimensions, a subsequence of the bounded quotients converges to some `A`. Along it, the
+  difference quotients of `M t * exp (-t A)` tend to `0` at every point. A mean-value theorem
+  for one-sided difference quotients then shows that this product is constant.
+* **Nonstandard analysis, after Euler**
+  ([NonstandardSemigroup.lean](Experiments/NonstandardSemigroup.lean)). Fix a positive
+  infinitesimal step `ε`. The quotient `(M ε - 1) / ε` is finite, so it has a standard part `A`.
+  Each step multiplies `M t * exp (-t A)` by a factor that differs from `1` by `ε` times an
+  infinitesimal. Over `⌊t / ε⌋` steps these changes add up to an infinitesimal, so the product
+  stays `1`. Hyperreals are sequences along an ultrafilter; Mathlib has no transfer principle,
+  so the proof works with those sequences directly. The ultrafilter makes the standard part
+  exist without extracting a subsequence.
+
+[Translation.lean](Experiments/Translation.lean) applies both to the translation semigroup.
+All of these compile and have no unproved steps. Neither is shorter than the integral proof,
+so the main proof keeps it:
+
+| Proof of the semigroup step | Files | Physical lines | Nonblank lines |
+|---|---|---:|---:|
+| Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
+| Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
+| Nonstandard analysis | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 282 | 258 |
+
+The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each alternative.
+
 ## Suggested kernel-optimizer citation
 
 The following replacement paragraph cites the verified complex-rank proof at an immutable
@@ -139,3 +179,5 @@ That revision uses Lean `v4.36.0-rc2` and Mathlib `v4.36.0-rc2` at commit
 lake exe cache get
 lake build
 ```
+
+`lake build` builds both the `KernelRankLean` proof and the `Experiments` library.
