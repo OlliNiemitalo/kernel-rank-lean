@@ -32,7 +32,48 @@ noncomputable section
 
 namespace Experiments
 
-variable {A : Type*} [NormedRing A] [NormedAlgebra ℝ A] [CompleteSpace A]
+variable {A : Type*} [NormedRing A] [NormedAlgebra ℝ A]
+
+/-- Telescoping over `⌊t / h⌋` steps of size `h`. If `M` and `E` are multiplicative and bounded
+by `C` and `D` on `[0, t]`, each step changes `M s * E s` by at most `C D ‖M h * E h - 1‖`. -/
+lemma norm_telescope_le (M E : ℝ → A) (h0 : M 0 = 1) (hE0 : E 0 = 1)
+    (hadd : ∀ s t, 0 ≤ s → 0 ≤ t → M (s + t) = M s * M t)
+    (hEadd : ∀ s u, E (s + u) = E s * E u) {t C D : ℝ} (ht : 0 ≤ t)
+    (hC : ∀ s ∈ Icc 0 t, ‖M s‖ ≤ C) (hD : ∀ s ∈ Icc 0 t, ‖E s‖ ≤ D) {h : ℝ} (hh : 0 < h) :
+    ‖M (⌊t / h⌋₊ * h) * E (⌊t / h⌋₊ * h) - 1‖ ≤ t * (C * D * ‖h⁻¹ • (M h * E h - 1)‖) := by
+  have hC0 : 0 ≤ C := (norm_nonneg _).trans (hC 0 ⟨le_rfl, ht⟩)
+  have hD0 : 0 ≤ D := (norm_nonneg _).trans (hD 0 ⟨le_rfl, ht⟩)
+  have hK : (⌊t / h⌋₊ : ℝ) * h ≤ t := (le_div_iff₀ hh).mp (Nat.floor_le (div_nonneg ht hh.le))
+  have hstep : ∀ j : ℕ, M ((j + 1 : ℕ) * h) * E ((j + 1 : ℕ) * h) - M (j * h) * E (j * h) =
+      M (j * h) * (M h * E h - 1) * E (j * h) := by
+    intro j
+    rw [Nat.cast_add_one, add_one_mul, hadd _ _ (mul_nonneg (Nat.cast_nonneg j) hh.le) hh.le,
+      add_comm (↑j * h), hEadd]
+    noncomm_ring
+  have hsum := Finset.sum_range_sub (fun j : ℕ => M (j * h) * E (j * h)) ⌊t / h⌋₊
+  simp only [Nat.cast_zero, zero_mul, h0, hE0, mul_one] at hsum
+  have hnorm : ‖M h * E h - 1‖ = h * ‖h⁻¹ • (M h * E h - 1)‖ := by
+    rw [norm_smul, Real.norm_eq_abs, abs_inv, abs_of_pos hh, mul_inv_cancel_left₀ hh.ne']
+  calc
+    ‖M (⌊t / h⌋₊ * h) * E (⌊t / h⌋₊ * h) - 1‖
+        ≤ ∑ j ∈ Finset.range ⌊t / h⌋₊, C * ‖M h * E h - 1‖ * D := by
+      rw [← hsum]
+      refine (norm_sum_le _ _).trans (Finset.sum_le_sum fun j hj => ?_)
+      have hjt : (j : ℝ) * h ∈ Icc 0 t :=
+        ⟨mul_nonneg (Nat.cast_nonneg j) hh.le,
+          (mul_le_mul_of_nonneg_right (by exact_mod_cast (Finset.mem_range.mp hj).le)
+            hh.le).trans hK⟩
+      rw [hstep]
+      exact norm_mul₃_le.trans (mul_le_mul
+        (mul_le_mul_of_nonneg_right (hC _ hjt) (norm_nonneg _)) (hD _ hjt) (norm_nonneg _)
+        (mul_nonneg hC0 (norm_nonneg _)))
+    _ = (⌊t / h⌋₊ * h) * (C * D * ‖h⁻¹ • (M h * E h - 1)‖) := by
+      rw [Finset.sum_const, Finset.card_range, nsmul_eq_mul, hnorm]
+      ring
+    _ ≤ t * (C * D * ‖h⁻¹ • (M h * E h - 1)‖) :=
+      mul_le_mul_of_nonneg_right hK (mul_nonneg (mul_nonneg hC0 hD0) (norm_nonneg _))
+
+variable [CompleteSpace A]
 
 /-- **Euler's step.** If the positive steps `ε` are infinitesimal along `l` and the difference
 quotient `(M ε - 1) / ε` has standard part `a`, then `M t = exp (t a)`. -/
@@ -54,8 +95,6 @@ lemma eq_exp_of_infinitesimal_generator (M : ℝ → A)
   obtain ⟨C, hC⟩ := isCompact_Icc.exists_bound_of_continuousOn
     (hcont.mono (Icc_subset_Ici_self : Icc 0 t ⊆ Ici 0))
   obtain ⟨D, hD⟩ := isCompact_Icc.exists_bound_of_continuousOn (hE.continuousOn (s := Icc 0 t))
-  have hC0 : 0 ≤ C := (norm_nonneg _).trans (hC 0 ⟨le_rfl, ht⟩)
-  have hD0 : 0 ≤ D := (norm_nonneg _).trans (hD 0 ⟨le_rfl, ht⟩)
   -- Step 2: one step multiplies `F` by `M ε * E ε`, and `(M ε * E ε - 1) / ε ≈ 0`.
   let g : ι → A := fun n => (ε n)⁻¹ • (M (ε n) * E (ε n) - 1)
   have hg : Tendsto g l (𝓝 0) := by
@@ -72,43 +111,11 @@ lemma eq_exp_of_infinitesimal_generator (M : ℝ → A)
     intro n
     simp only [g, E, smul_sub, sub_mul, smul_mul_assoc, one_mul]
     abel
-  have hstep : ∀ n (j : ℕ), F ((j + 1 : ℕ) * ε n) - F (j * ε n) =
-      M (j * ε n) * (M (ε n) * E (ε n) - 1) * E (j * ε n) := by
-    intro n j
-    have hj : (0 : ℝ) ≤ j * ε n := mul_nonneg (Nat.cast_nonneg j) (hpos n).le
-    simp only [F]
-    rw [Nat.cast_add_one, add_one_mul, hadd _ _ hj (hpos n).le, add_comm (↑j * ε n), hEadd]
-    noncomm_ring
   -- Step 3: telescoping over `K = ⌊t / ε⌋` steps.
   have hKt : ∀ n, (⌊t / ε n⌋₊ : ℝ) * ε n ≤ t := fun n =>
     (le_div_iff₀ (hpos n)).mp (Nat.floor_le (div_nonneg ht (hpos n).le))
-  have htel : ∀ n, ‖F (⌊t / ε n⌋₊ * ε n) - 1‖ ≤ t * (C * D * ‖g n‖) := by
-    intro n
-    have hsum := Finset.sum_range_sub (fun j : ℕ => F (j * ε n)) ⌊t / ε n⌋₊
-    simp only [Nat.cast_zero, zero_mul, F, E, h0, zero_smul, exp_zero, mul_one] at hsum
-    have hnorm : ‖M (ε n) * E (ε n) - 1‖ = ε n * ‖g n‖ := by
-      rw [norm_smul, Real.norm_eq_abs, abs_inv, abs_of_pos (hpos n),
-        mul_inv_cancel_left₀ (hpos n).ne']
-    calc
-      ‖F (⌊t / ε n⌋₊ * ε n) - 1‖
-          ≤ ∑ j ∈ Finset.range ⌊t / ε n⌋₊, C * ‖M (ε n) * E (ε n) - 1‖ * D := by
-        rw [show F (⌊t / ε n⌋₊ * ε n) - 1 = _ from hsum.symm]
-        refine (norm_sum_le _ _).trans (Finset.sum_le_sum fun j hj => ?_)
-        have hjt : (j : ℝ) * ε n ∈ Icc 0 t :=
-          ⟨mul_nonneg (Nat.cast_nonneg j) (hpos n).le,
-            (mul_le_mul_of_nonneg_right (by exact_mod_cast (Finset.mem_range.mp hj).le)
-              (hpos n).le).trans (hKt n)⟩
-        rw [show M (j * ε n) * E (j * ε n) = F (j * ε n) from rfl,
-          show M ((j + 1 : ℕ) * ε n) * E ((j + 1 : ℕ) * ε n) = F ((j + 1 : ℕ) * ε n) from rfl,
-          hstep]
-        exact norm_mul₃_le.trans (mul_le_mul
-          (mul_le_mul_of_nonneg_right (hC _ hjt) (norm_nonneg _)) (hD _ hjt) (norm_nonneg _)
-          (mul_nonneg hC0 (norm_nonneg _)))
-      _ = (⌊t / ε n⌋₊ * ε n) * (C * D * ‖g n‖) := by
-        rw [Finset.sum_const, Finset.card_range, nsmul_eq_mul, hnorm]
-        ring
-      _ ≤ t * (C * D * ‖g n‖) :=
-        mul_le_mul_of_nonneg_right (hKt n) (mul_nonneg (mul_nonneg hC0 hD0) (norm_nonneg _))
+  have htel : ∀ n, ‖F (⌊t / ε n⌋₊ * ε n) - 1‖ ≤ t * (C * D * ‖g n‖) := fun n =>
+    norm_telescope_le M E h0 (by simp [E]) hadd hEadd ht hC hD (hpos n)
   -- `K ε ≈ t`, so `F t ≈ F (K ε) ≈ 1`.
   have hKlim : Tendsto (fun n => (⌊t / ε n⌋₊ : ℝ) * ε n) l (𝓝[Icc 0 t] t) := by
     have hlo : ∀ n, t - ε n ≤ (⌊t / ε n⌋₊ : ℝ) * ε n := fun n => by

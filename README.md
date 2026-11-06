@@ -25,8 +25,9 @@ half-plane, and real coefficients for real rates. `separableRank_radial_lt_top_i
 states the classification on its own: the rank is finite exactly when `φ` is a sum of
 components on `[0, ∞)`.
 
-The proof is complete (no `sorry`); `#print axioms` reports only `propext`,
-`Classical.choice` and `Quot.sound`.
+The proof in the `KernelRankLean` library is complete (no `sorry`); `#print axioms` reports
+only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library holds
+alternative proofs of one step and a draft, described [below](#alternative-proofs-of-the-semigroup-step).
 
 The kernel-rank definitions and row-span characterization also work over arbitrary fields and
 arbitrary index sets. `separableRank_ofReal` shows that allowing complex factors does not lower
@@ -47,13 +48,14 @@ $p(X) = \prod_\mu (X - \mu)^{\deg P_\mu + 1}$.
 Taylor expansion bounds the translate-span dimension from above. Cayley–Hamilton supplies
 an annihilator whose degree equals that dimension, giving the matching lower bound.
 
-Necessity and the exact-rank lower bound use the same basis-free realization on
-the complex translate space: the profile is its initial vector and evaluation at zero is its
-output functional. Continuity uses a norm compatible with the pointwise topology. No
-translation matrices, coordinate readback, or cyclic-vector/minimal-polynomial dimension
-argument is needed.
+Necessity and the exact-rank lower bound share one realization, with no choice of basis.
+Translation acts on the finite-dimensional complex span of the translates of `φ`; it is a
+continuous semigroup, hence `exp (t A)`. The profile is the initial vector, and evaluation at
+zero reads it back out. Continuity uses a norm compatible with the pointwise topology.
 
 ## Files
+
+The proof is in [KernelRankLean](KernelRankLean):
 
 | File | Content |
 |---|---|
@@ -82,8 +84,8 @@ nonblank lines include comments but exclude whitespace-only lines. Dependencies,
 outputs and external scratch files are excluded. Each committed revision is counted from
 its Git contents, not from the current checkout.
 
-Counts use the existing formatting; this documentation update does not reformat Lean code
-or remove comments or blank lines to improve the totals. Added abstractions count in full:
+Counts use the code as committed: no reformatting, and no removal of comments or blank lines
+to improve the totals. Added abstractions count in full:
 moving a proof into a helper does not itself reduce the total. Line counts describe source
 size, not mathematical complexity.
 
@@ -95,9 +97,10 @@ size, not mathematical complexity.
 | [`83a404c`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/83a404c7298338065b70fdc39827671a1ec3b695) | Share real/imaginary independence through coefficient synthesis | 1,341 | 1,159 | +25 |
 | [`240dea0`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/240dea077b40a8aa9ce0e90ea13d8e546614f594) | Compute exact rank over the complex numbers; use conjugate expansion and scalar extension | 1,340 | 1,169 | -1 |
 | [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
-| This revision | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
+| [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 
-Deltas compare consecutive rows. Through `240dea0`, the proof is **30 physical lines and 25
+Later commits change only the `Experiments` library and this README, so the proof stays at
+1,587 lines. Deltas compare consecutive rows. Through `240dea0`, the proof is **30 physical lines and 25
 nonblank lines smaller** than the initial proof. Complexification saved 110 lines in the
 proof-specific parts, but its reusable infrastructure makes the whole change essentially
 size-neutral: one fewer physical line and ten more nonblank lines.
@@ -108,9 +111,9 @@ to 1,726 physical lines; sharing the translation realization then removed 46, yi
 1,680. The intermediate 1,726-line version was not committed. The 1,680-line stage
 exceeds `240dea0` by 340 physical lines, with both new modules included.
 
-This revision actually removes superseded proof machinery while preserving
-the classification and minimal-annihilator statements: **93 fewer physical lines and 77
-fewer nonblank lines** than `40bfb90`, counting the new differential-operator module too.
+`cae13d6` removes superseded proof machinery while preserving the classification and
+minimal-annihilator statements: **93 fewer physical lines and 77 fewer nonblank lines** than
+`40bfb90`, counting the new differential-operator module too.
 It still has **271 more physical lines than `0d9d939`** (and 247 more than `240dea0`).
 Thus it reduces the extended proof, but has not yet made it smaller than the earlier
 classification-only proof.
@@ -123,8 +126,8 @@ of the profile is such a semigroup, so this step produces the generator `A`.
 [Semigroup.lean](KernelRankLean/Semigroup.lean) proves it by smoothing with an integral. It
 works in any Banach algebra.
 
-The [Experiments](Experiments) folder holds two other proofs of this step, for
-finite-dimensional algebras. Both start from the same bound: if `M` stays within `1/2` of `1`
+The [Experiments](Experiments) folder holds two other complete proofs of this step, for
+finite-dimensional algebras, and a draft described in the next section. Both proofs start from the same bound: if `M` stays within `1/2` of `1`
 on `[0, δ]`, geometric sums bound the difference quotients `(M h - 1) / h` for `h = δ / n`.
 
 * **Finite differences**
@@ -142,16 +145,60 @@ on `[0, δ]`, geometric sums bound the difference quotients `(M h - 1) / h` for 
   exist without extracting a subsequence.
 
 [Translation.lean](Experiments/Translation.lean) applies both to the translation semigroup.
-All of these compile and have no unproved steps. Neither is shorter than the integral proof,
-so the main proof keeps it:
+Both compile and have no unproved steps. Neither is shorter than the integral proof, so the
+main proof keeps it:
 
 | Proof of the semigroup step | Files | Physical lines | Nonblank lines |
 |---|---|---:|---:|
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
-| Nonstandard analysis | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 282 | 258 |
+| Nonstandard analysis | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
 
 The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each alternative.
+
+## A purely nonstandard approach
+
+Nonstandard analysis suggests a different picture of the whole theorem: the continuous result is
+the standard part of a discrete one.
+
+**The theorem.** Since `x²` and `y²` range over `[0, ∞)`, the separable rank of `φ(x² + y²)` is
+the rank of the kernel `φ(s + t)` on `[0, ∞)²`. Fix an infinitesimal step `ε > 0` and an
+unlimited hypernatural `N`, and sample on the hyperfinite grid `0, ε, 2ε, …, Nε`: let
+`aₖ = φ(kε)` and let `H` be the hyperfinite Hankel matrix `H_{jk} = a_{j+k}`. For continuous `φ`,
+the separable rank is finite exactly when `rank H` is a standard natural number, and then the
+two are equal. If every `(r + 1)`-minor of `φ(s + t)` vanishes, this transfers to the grid, so
+`rank H ≤ r`. Conversely, a nonzero `r`-minor at standard points stays nonzero at nearby grid
+points, by continuity, so `rank H ≥ r`.
+
+**The proof.** A sequence whose Hankel matrix has finite rank satisfies a linear recurrence:
+`aₖ = β Sᵏ v` for a square matrix `S` (Kronecker's theorem). `S` advances the grid by one
+infinitesimal step, so it is close to the identity; write `S = 1 + εQ`. In a suitable basis,
+continuity and a geometric-sum bound make `Q` finite, so it has a standard part `A`. For
+standard `t`, after `n = ⌊t / ε⌋` steps, `φ(t) ≈ β Sⁿ v ≈ β exp (t A) v`, as in Euler's
+derivation of the exponential function. Generalized eigenvectors of `A` then give exponential
+polynomials, and the exact rank is algebra. Polynomial factors such as `t e^{μt}` appear as
+standard parts of combinations of nearly equal discrete roots, which is why multiplicities
+enter the cost.
+
+**Why the main proof does not use it.** Mathlib has hyperreals but no transfer principle, so
+every transferred statement (ranks of hyperfinite matrices, internal spans) would need its own
+proof. Kronecker's theorem for finite Hankel matrices also has boundary cases that the infinite
+version avoids. The main proof gets the same realization for free: shifting acts on the span of
+the translates of `φ`.
+
+**A draft.** [NonstandardDraft.lean](Experiments/NonstandardDraft.lean) writes the analytic core,
+`S = 1 + εQ`, `A = st Q`, `Sⁿ ≈ exp (t A)`, in nonstandard language, for the continuous
+semigroup of the main proof. It does not formalize the hyperfinite Hankel matrix or Kronecker's
+theorem. It defines a small interface: the ultrapower `Hyp α` along `hyperfilter ℕ`, natural
+extensions `ext f`, internal membership, and `x ≈ₕ y` for "infinitely close". 17 of the
+interface lemmas are left as `sorry`:
+one-variable transfer, arithmetic of `≈ₕ`, standard parts in finite dimensions, continuity and
+derivatives at infinitesimal scale, and `1 / ω ≈ 0`. These are the facts a nonstandard analysis
+library would provide, and most would be short proofs about limits along the ultrafilter. The
+proof of the semigroup theorem itself (91 lines) has no `sorry`. It reuses the geometric-sum bound
+and the finite telescoping estimate `norm_telescope_le`, which are ordinary analysis. Being a
+draft, it is built by `lake build` but its theorem depends on `sorryAx`; the main theorem does
+not.
 
 ## Suggested kernel-optimizer citation
 
@@ -180,4 +227,5 @@ lake exe cache get
 lake build
 ```
 
-`lake build` builds both the `KernelRankLean` proof and the `Experiments` library.
+`lake build` builds both the `KernelRankLean` proof and the `Experiments` library. The
+`declaration uses 'sorry'` warnings all come from the draft `Experiments/NonstandardDraft.lean`.
