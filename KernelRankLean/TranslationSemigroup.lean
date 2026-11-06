@@ -7,8 +7,8 @@ import KernelRankLean.Complexification
 
 Translations act directly on the finite-dimensional span of a continuous profile's translates.
 A compatible norm preserves its pointwise topology, so the translation semigroup is continuous
-and has an exponential generator. The initial profile and evaluation at zero give a reachable,
-observable realization, shared by the component and differential-annihilator proofs.
+and has an exponential generator. The initial profile and evaluation at zero give the
+realization shared by necessity and the exact-rank lower bound.
 -/
 
 open NNReal
@@ -45,25 +45,7 @@ noncomputable def shiftW (t : ℝ≥0) : translateSpan φ →ₗ[𝕜] translate
 lemma shiftW_apply (t : ℝ≥0) (g : translateSpan φ) (u : ℝ≥0) :
     (shiftW φ t g : ℝ≥0 → 𝕜) u = (g : ℝ≥0 → 𝕜) (u + t) := rfl
 
-lemma shiftW_zero : shiftW φ 0 = 1 := by ext g u; simp [shiftW_apply]
-
-lemma shiftW_add (s t : ℝ≥0) : shiftW φ (s + t) = shiftW φ s * shiftW φ t := by
-  ext g u
-  simp only [shiftW_apply, Module.End.mul_apply, add_assoc]
-
 noncomputable def initialProfile : translateSpan φ := ⟨_, translate_mem_translateSpan φ 0⟩
-
-lemma span_range_shiftW :
-    Submodule.span 𝕜 (Set.range fun t : ℝ≥0 => shiftW φ t (initialProfile φ)) = ⊤ := by
-  apply Submodule.map_injective_of_injective
-    (f := (translateSpan φ).subtype) Subtype.coe_injective
-  rw [Submodule.map_span, Submodule.map_top, Submodule.range_subtype, ← Set.range_comp]
-  simp only [Function.comp_def]
-  have hshift : (fun t => (translateSpan φ).subtype (shiftW φ t (initialProfile φ))) =
-      fun (t u : ℝ≥0) => φ (u + t) := by ext t u; simp [shiftW_apply, initialProfile]
-  change Submodule.span 𝕜 (Set.range _) = _
-  rw [hshift]
-  rfl
 
 lemma finiteDimensional_translateSpan_ofReal (φ : ℝ → ℝ)
     [FiniteDimensional ℝ (translateSpan φ)] :
@@ -173,31 +155,6 @@ lemma profile_of_generator (A : translateSpan ψ →L[ℂ] translateSpan ψ)
   change ψ t = (NormedSpace.exp ((t : ℂ) • A) (initialProfile ψ)).1 0
   rw [generator_apply ψ A hA _ ht]
   simp [initialProfile, Real.coe_toNNReal t ht]
-
-lemma reachable_of_generator (A : translateSpan ψ →L[ℂ] translateSpan ψ)
-    (hA : ∀ t : ℝ, 0 ≤ t → shiftCLM ψ t = NormedSpace.exp ((t : ℂ) • A)) :
-    Submodule.span ℂ (Set.range fun t : ℝ≥0 =>
-      NormedSpace.exp ((t : ℂ) • A) (initialProfile ψ)) = ⊤ := by
-  have h : (fun t : ℝ≥0 => NormedSpace.exp ((t : ℂ) • A) (initialProfile ψ)) =
-      fun t : ℝ≥0 => shiftW ψ t (initialProfile ψ) := by
-    ext t u
-    rw [← hA (t : ℝ) t.2]
-    change (shiftW ψ (t : ℝ).toNNReal (initialProfile ψ)).1 u = _
-    rw [Real.toNNReal_coe]
-  rw [h]
-  exact span_range_shiftW ψ
-
-lemma observable_of_generator (A : translateSpan ψ →L[ℂ] translateSpan ψ)
-    (hA : ∀ t : ℝ, 0 ≤ t → shiftCLM ψ t = NormedSpace.exp ((t : ℂ) • A))
-    (g : translateSpan ψ)
-    (hg : ∀ t : ℝ, 0 ≤ t → evalW ψ 0 (NormedSpace.exp ((t : ℂ) • A) g) = 0) :
-    g = 0 := by
-  ext u
-  have h := hg u u.2
-  change (NormedSpace.exp ((u : ℂ) • A) g).1 0 = 0 at h
-  rw [← hA (u : ℝ) u.2] at h
-  change g.1 (0 + (u : ℝ).toNNReal) = 0 at h
-  simpa using h
 
 end Complex
 

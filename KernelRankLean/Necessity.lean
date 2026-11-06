@@ -71,15 +71,12 @@ lemma exp_smul_apply_of_genEigen (A : E →L[ℂ] E) (μ : ℂ) {v : E} {k : ℕ
   rw [Finset.smul_sum]
   simp only [smul_smul, N]
 
-/-- **Necessity.** A profile, continuous on `[0, ∞)`, whose translates span a finite-dimensional
-space is, on `[0, ∞)`, the profile of a representation. -/
-theorem exists_representation_of_finiteDimensional (φ : ℝ → ℝ) (hφ : ContinuousOn φ (Set.Ici 0))
-    [FiniteDimensional ℝ (translateSpan φ)] :
-    ∃ cs : List Component, IsRepresentation cs ∧ ∀ s, 0 ≤ s → φ s = profile cs s := by
+/-- A continuous complex profile with finite-dimensional translate span is an exponential sum. -/
+theorem exists_sum_expPoly_of_finiteDimensional (ψ : ℝ → ℂ)
+    [FiniteDimensional ℂ (translateSpan ψ)] (hψ : ContinuousOn ψ (Set.Ici 0)) :
+    ∃ S : Finset ℂ, ∃ Q : ℂ → ℂ[X], ∀ t, 0 ≤ t → ψ t = ∑ μ ∈ S, expPoly (Q μ) μ t := by
   classical
-  let ψ : ℝ → ℂ := fun t => (φ t : ℂ)
-  let : FiniteDimensional ℂ (translateSpan ψ) := finiteDimensional_translateSpan_ofReal φ
-  obtain ⟨A, hA⟩ := exists_translation_generator ψ (Complex.continuous_ofReal.comp_continuousOn hφ)
+  obtain ⟨A, hA⟩ := exists_translation_generator ψ hψ
   -- Split the starting vector into generalized eigenvectors.
   have hx : initialProfile ψ ∈ ⨆ μ, Module.End.maxGenEigenspace A.toLinearMap μ := by
     rw [Module.End.iSup_maxGenEigenspace_eq_top]
@@ -89,8 +86,7 @@ theorem exists_representation_of_finiteDimensional (φ : ℝ → ℝ) (hφ : Con
   let Q : ℂ → ℂ[X] := fun μ =>
     ∑ m ∈ Finset.range (k μ),
       C ((m.factorial : ℂ)⁻¹ * evalW ψ 0 (((A - μ • 1) ^ m) (f μ))) * X ^ m
-  refine exists_representation_of_sum_expPoly φ f.support Q fun t ht => ?_
-  change ψ t = _
+  refine ⟨f.support, Q, fun t ht => ?_⟩
   rw [profile_of_generator ψ A hA ht, ← hfsum, Finsupp.sum]
   simp only [map_sum]
   refine Finset.sum_congr rfl fun μ _ => ?_
@@ -99,6 +95,17 @@ theorem exists_representation_of_finiteDimensional (φ : ℝ → ℝ) (hφ : Con
     map_sum, map_smul, smul_eq_mul, Finset.sum_mul]
   refine Finset.sum_congr rfl fun m _ => ?_
   ring
+
+/-- **Necessity.** A profile, continuous on `[0, ∞)`, whose translates span a finite-dimensional
+space is, on `[0, ∞)`, the profile of a representation. -/
+theorem exists_representation_of_finiteDimensional (φ : ℝ → ℝ) (hφ : ContinuousOn φ (Set.Ici 0))
+    [FiniteDimensional ℝ (translateSpan φ)] :
+    ∃ cs : List Component, IsRepresentation cs ∧ ∀ s, 0 ≤ s → φ s = profile cs s := by
+  let ψ : ℝ → ℂ := fun t => (φ t : ℂ)
+  let : FiniteDimensional ℂ (translateSpan ψ) := finiteDimensional_translateSpan_ofReal φ
+  obtain ⟨S, Q, hψ⟩ := exists_sum_expPoly_of_finiteDimensional ψ
+    (Complex.continuous_ofReal.comp_continuousOn hφ)
+  exact exists_representation_of_sum_expPoly φ S Q hψ
 
 end Exp
 

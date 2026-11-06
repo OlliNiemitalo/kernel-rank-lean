@@ -41,16 +41,17 @@ extension then gives the same rank over the reals.
 `exists_minimal_differential_annihilator` gives another characterization for continuous
 finite-rank profiles: there is a monic polynomial `p` whose degree equals the radial kernel's
 rank, and `q(D) φ = 0` on `[0, ∞)` exactly when `p` divides `q`. Here `D` uses derivatives
-within that half-line, including right derivatives at zero. The proof makes the translation
-realization's reachability and observability explicit and identifies `p` with the generator's
-minimal polynomial. This is a reusable bridge, not a shorter replacement for the component
-classification proof.
+within that half-line, including right derivatives at zero. For an exponential-polynomial
+expansion, the proof computes
+$p(X) = \prod_\mu (X - \mu)^{\deg P_\mu + 1}$.
+Taylor expansion bounds the translate-span dimension from above. Cayley–Hamilton supplies
+an annihilator whose degree equals that dimension, giving the matching lower bound.
 
-Both necessity and the annihilator characterization use the same basis-free realization on
+Necessity and the exact-rank lower bound use the same basis-free realization on
 the complex translate space: the profile is its initial vector and evaluation at zero is its
-output functional. Continuity uses a norm compatible with the pointwise topology; reachability
-is the defining span property, and observability is equality of functions. No translation
-matrices or coordinate readback are needed.
+output functional. Continuity uses a norm compatible with the pointwise topology. No
+translation matrices, coordinate readback, or cyclic-vector/minimal-polynomial dimension
+argument is needed.
 
 ## Files
 
@@ -60,15 +61,15 @@ matrices or coordinate readback are needed.
 | `RowSpan.lean` | Separable rank = dimension of the span of the rows |
 | `Complexification.lean` | Real-valued kernels have the same separable rank over the real and complex numbers |
 | `Translations.lean` | For radial kernels: the span of the translates `u ↦ φ (u + t)` |
-| `ProductRank.lean` | Sums of products with independent factors |
 | `ExpPoly.lean`, `RealExpPoly.lean` | Uniqueness and conjugation of exponential polynomials |
-| `ComplexRank.lean` | Exact complex rank from independent monomial and Hasse-derivative factors |
+| `ComplexRank.lean` | Product annihilators; exact complex rank by Taylor expansion and Cayley–Hamilton |
+| `Differential.lean` | Half-line differential operators; Cayley–Hamilton annihilators of exponential orbits |
 | `Sufficiency.lean` | Exact real rank by conjugate expansion and scalar extension |
 | `Semigroup.lean` | Continuous one-parameter semigroups in a Banach algebra are `exp (t A)` |
-| `TranslationSemigroup.lean` | Shared basis-free exponential realization; reachability and observability |
+| `TranslationSemigroup.lean` | Shared basis-free exponential realization of translation |
 | `Representation.lean` | Regrouping a real exponential-polynomial sum by conjugate pairs |
 | `Necessity.lean` | A finite-rank radial kernel's profile is a sum of components |
-| `Annihilator.lean` | Cyclic generators; rank equals the least constant-coefficient differential-annihilator order |
+| `Annihilator.lean` | Rank equals the least constant-coefficient differential-annihilator order |
 | `Main.lean` | The main theorems |
 
 ## Commit history and Lean source size
@@ -91,18 +92,26 @@ size, not mathematical complexity.
 | [`0d9d939`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/0d9d93961eedd646b689786514d33255fac6c711) | Simplify translation continuity and semigroup smoothing | 1,316 | 1,142 | -54 |
 | [`83a404c`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/83a404c7298338065b70fdc39827671a1ec3b695) | Share real/imaginary independence through coefficient synthesis | 1,341 | 1,159 | +25 |
 | [`240dea0`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/240dea077b40a8aa9ce0e90ea13d8e546614f594) | Compute exact rank over the complex numbers; use conjugate expansion and scalar extension | 1,340 | 1,169 | -1 |
-| Annihilator/shared-realization stage, 2026-11-06 (this revision) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
+| [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
+| This revision | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 
-Deltas compare consecutive rows. The committed proof is **30 physical lines and 25
+Deltas compare consecutive rows. Through `240dea0`, the proof is **30 physical lines and 25
 nonblank lines smaller** than the initial proof. Complexification saved 110 lines in the
 proof-specific parts, but its reusable infrastructure makes the whole change essentially
 size-neutral: one fewer physical line and ten more nonblank lines.
 
-The annihilator/shared-realization stage is not a like-for-like shortening of the original theorem: it adds
+The `40bfb90` stage is not a like-for-like shortening of the original theorem: it adds
 the differential-annihilator characterization. That extension initially brought the total
 to 1,726 physical lines; sharing the translation realization then removed 46, yielding
-1,680. The intermediate 1,726-line version was not committed. The final total still
+1,680. The intermediate 1,726-line version was not committed. The 1,680-line stage
 exceeds `240dea0` by 340 physical lines, with both new modules included.
+
+This revision actually removes superseded proof machinery while preserving
+the classification and minimal-annihilator statements: **93 fewer physical lines and 77
+fewer nonblank lines** than `40bfb90`, counting the new differential-operator module too.
+It still has **271 more physical lines than `0d9d939`** (and 247 more than `240dea0`).
+Thus it reduces the extended proof, but has not yet made it smaller than the earlier
+classification-only proof.
 
 ## Suggested kernel-optimizer citation
 
