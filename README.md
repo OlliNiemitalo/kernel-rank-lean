@@ -36,7 +36,7 @@ The proof is complete (no `sorry`); `#print axioms` reports only `propext`,
 | `RowSpan.lean` | Separable rank = dimension of the span of the rows |
 | `Translations.lean` | For radial kernels: the span of the translates `u ↦ φ (u + t)` |
 | `ProductRank.lean` | Sums of products with independent factors |
-| `ExpPoly.lean`, `RealExpPoly.lean` | (Real parts of) exponential polynomials vanish only trivially |
+| `ExpPoly.lean`, `RealExpPoly.lean` | Uniqueness of exponential polynomials; injective real coefficient synthesis |
 | `Sufficiency.lean` | A representation's kernel has rank equal to its cost |
 | `Semigroup.lean` | Continuous one-parameter semigroups in a Banach algebra are `exp (t A)` |
 | `Representation.lean` | Regrouping a real exponential-polynomial sum by conjugate pairs |

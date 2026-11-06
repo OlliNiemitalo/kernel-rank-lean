@@ -14,8 +14,9 @@ Hasse derivative of `P`, of degree `m - 1 - k`. Taking real parts,
 with `z k (u) = u ^ k exp (λ u)` and `w k (t) = Q k (t) exp (λ t)`. For a real rate the imaginary
 parts vanish. So the translates `u ↦ φ (u + t)` of a profile `φ` are sums of products of the
 functions `Re z`, `Im z` of `u` and `Re w`, `- Im w` of `t`; both families are linearly
-independent (the real parts of exponential polynomials vanish only trivially, and the `Q k` have
-distinct degrees), so the translates span a space of dimension equal to the number of terms:
+independent: the injective coefficient synthesis map transports independence of the monomials and
+of the Hasse derivatives (which have distinct degrees). Thus the translates span a space of
+dimension equal to the number of terms:
 `m` per real rate and `2 m` per complex one.
 -/
 
@@ -52,11 +53,13 @@ lemma expPoly_translate {P : ℂ[X]} {m : ℕ} (hm : P.natDegree < m) (μ : ℂ)
 
 /-! ### The triangular family of Hasse derivatives -/
 
-/-- The Hasse derivatives `hasseDeriv k P`, `k ≤ deg P`, have degrees `deg P - k`, so a vanishing
-combination of them is trivial. -/
-lemma eq_zero_of_sum_hasseDeriv_eq_zero {P : ℂ[X]} (hP : P ≠ 0) (c : Fin (P.natDegree + 1) → ℂ)
-    (h : ∑ k, C (c k) * hasseDeriv k P = 0) : ∀ k, c k = 0 := by
+/-- The Hasse derivatives of a nonzero polynomial are independent: their degrees are distinct. -/
+lemma linearIndependent_hasseDeriv {P : ℂ[X]} (hP : P ≠ 0) :
+    LinearIndependent ℂ (fun k : Fin (P.natDegree + 1) => hasseDeriv k P) := by
   classical
+  rw [Fintype.linearIndependent_iff]
+  intro c h
+  simp only [smul_eq_C_mul] at h
   by_contra hne
   obtain ⟨k₀, hk₀, hmin'⟩ :=
     wellFounded_lt.has_min {k | c k ≠ 0} (by simpa [Set.Nonempty] using not_forall.mp hne)
@@ -143,111 +146,88 @@ lemma familyProfile_translate (t : ℝ≥0) :
     simp only [tFactor, uFactor, Sum.elim_inr, zFun, im_expPoly_X_pow i.2, zero_mul, sub_zero]
     ring
 
-lemma coeff_sum_C_mul_X_pow {m : ℕ} (c : Fin m → ℂ) (k : Fin m) :
-    (∑ k', C (c k') * X ^ (k' : ℕ)).coeff k = c k := by
-  simp [finsetSum_coeff, Fin.val_inj]
-
 variable {comp}
 
-/-- The functions `Re z`, `Im z` of `u` are linearly independent. -/
-lemma linearIndependent_uFactor (hinj : Function.Injective fun i => (comp i).rate)
-    (hup : ∀ i, 0 ≤ (comp i).rate.im) : LinearIndependent ℝ (uFactor comp) := by
-  rw [Fintype.linearIndependent_iff]
-  intro g hg
-  -- Each component's coefficients, combined into one complex polynomial.
-  let c : ∀ i, Fin (comp i).multiplicity → ℂ := fun i k =>
-    if h : (comp i).rate.im = 0 then (g (Sum.inr ⟨⟨i, h⟩, k⟩) : ℂ)
-    else (g (Sum.inl ⟨⟨i, h⟩, k, 0⟩) : ℂ) - I * g (Sum.inl ⟨⟨i, h⟩, k, 1⟩)
-  let A : ι → ℂ[X] := fun i => ∑ k, C (c i k) * X ^ (k : ℕ)
-  have hA : ∀ u : ℝ, 0 < u → ∑ i, (expPoly (A i) (comp i).rate u).re = 0 := by
-    intro u hu
-    have := congrFun hg ⟨u, hu.le⟩
-    erw [Finset.sum_apply] at this
-    replace this : ∑ j, g j * uFactor comp j ⟨u, hu.le⟩ = 0 := this
-    rw [← this,  Fintype.sum_sum_type, Fintype.sum_sigma, Fintype.sum_sigma,
-      ← Fintype.sum_subtype_add_sum_subtype (fun i => (comp i).rate.im = 0), add_comm]
-    congr 1
-    · refine Finset.sum_congr rfl fun i _ => ?_
-      rw [Fintype.sum_prod_type]
-      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
-      refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, Fin.sum_univ_two, uFactor, zFun, Complex.mul_re]
-      rfl
-    · refine Finset.sum_congr rfl fun i _ => ?_
-      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
-      refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, uFactor, zFun]
-      exact Or.inl rfl
-  rintro (⟨⟨i, hi⟩, k, p⟩ | ⟨⟨i, hi⟩, k⟩)
-  · have hpos : 0 < (comp i).rate.im := lt_of_le_of_ne (hup i) (Ne.symm hi)
-    have hc := congrArg (fun P => P.coeff k)
-      ((eq_zero_of_sum_re_expPoly_eq_zero hinj hup A hA i).1 hpos)
-    simp only [A, coeff_sum_C_mul_X_pow, coeff_zero] at hc
-    simp only [c, hi, ↓reduceDIte] at hc
-    have hre := congrArg Complex.re hc
-    have him := congrArg Complex.im hc
-    simp at hre him
-    fin_cases p
-    · exact hre
-    · exact him
-  · have hc := (eq_zero_of_sum_re_expPoly_eq_zero hinj hup A hA i).2 hi k
-    simp only [A, coeff_sum_C_mul_X_pow] at hc
-    simpa [c, hi] using hc
+/-- Real and scaled imaginary parts of a family of exponential polynomials. -/
+noncomputable def expPolyFactors (Q : ∀ i, Fin (comp i).multiplicity → ℂ[X]) (σ : ℝ) :
+    TermIndex comp → ℝ≥0 → ℝ :=
+  Sum.elim (fun j u => if j.2.2 = 0 then (expPoly (Q j.1 j.2.1) (comp j.1).rate u).re
+    else σ * (expPoly (Q j.1 j.2.1) (comp j.1).rate u).im)
+    (fun j u => (expPoly (Q j.1 j.2) (comp j.1).rate u).re)
 
-/-- The functions `Re w`, `- Im w` of `t` are linearly independent. -/
-lemma linearIndependent_tFactor (hinj : Function.Injective fun i => (comp i).rate)
-    (hwf : ∀ i, (comp i).WellFormed) : LinearIndependent ℝ (tFactor comp) := by
-  have hup : ∀ i, 0 ≤ (comp i).rate.im := fun i => (hwf i).2.1
+omit [Fintype ι] in
+/-- Injective synthesis transports independence of polynomial families to their real factors. -/
+lemma linearIndependent_expPolyFactors [Finite ι]
+    (hinj : Function.Injective fun i => (comp i).rate)
+    (hup : ∀ i, 0 ≤ (comp i).rate.im)
+    (Q : ∀ i, Fin (comp i).multiplicity → ℂ[X])
+    (hQ : ∀ i, LinearIndependent ℂ (Q i))
+    (hreal : ∀ i, (comp i).rate.im = 0 → ∀ k n, ((Q i k).coeff n).im = 0)
+    (σ : ℝ) (hσ : σ ≠ 0) : LinearIndependent ℝ (expPolyFactors Q σ) := by
+  letI := Fintype.ofFinite ι
   rw [Fintype.linearIndependent_iff]
   intro g hg
-  -- Each component's coefficients, combined with its Hasse derivatives into one polynomial.
   let c : ∀ i, Fin (comp i).multiplicity → ℂ := fun i k =>
     if h : (comp i).rate.im = 0 then (g (Sum.inr ⟨⟨i, h⟩, k⟩) : ℂ)
-    else (g (Sum.inl ⟨⟨i, h⟩, k, 0⟩) : ℂ) + I * g (Sum.inl ⟨⟨i, h⟩, k, 1⟩)
-  let B : ι → ℂ[X] := fun i => ∑ k, C (c i k) * hasseDeriv k (comp i).poly
-  have hB : ∀ t : ℝ, 0 < t → ∑ i, (expPoly (B i) (comp i).rate t).re = 0 := by
-    intro t ht
-    have := congrFun hg t.toNNReal
+    else (g (Sum.inl ⟨⟨i, h⟩, k, 0⟩) : ℂ) -
+      I * (σ * g (Sum.inl ⟨⟨i, h⟩, k, 1⟩) : ℝ)
+  let A : ι → ℂ[X] := fun i => ∑ k, C (c i k) * Q i k
+  have hAr : A ∈ realCoefficientFamilies (fun i => (comp i).rate) := by
+    intro i hi n
+    simp only [A, finsetSum_coeff, coeff_C_mul, Complex.im_sum]
+    exact Finset.sum_eq_zero fun k _ => by simp [c, hi, Complex.mul_im, hreal i hi k n]
+  have hA : realExpPolySynthesis (fun i => (comp i).rate) ⟨A, hAr⟩ = 0 := by
+    ext u
+    change ∑ i, (expPoly (A i) (comp i).rate u).re = 0
+    have := congrFun hg u
     erw [Finset.sum_apply] at this
-    replace this : ∑ j, g j * tFactor comp j t.toNNReal = 0 := this
-    have ht' : ((t.toNNReal : ℝ≥0) : ℝ) = t := Real.coe_toNNReal t ht.le
+    replace this : ∑ j, g j * expPolyFactors Q σ j u = 0 := this
     rw [← this, Fintype.sum_sum_type, Fintype.sum_sigma, Fintype.sum_sigma,
       ← Fintype.sum_subtype_add_sum_subtype (fun i => (comp i).rate.im = 0), add_comm]
     congr 1
     · refine Finset.sum_congr rfl fun i _ => ?_
       rw [Fintype.sum_prod_type]
-      simp only [B, expPoly_sum, expPoly_C_mul, Complex.re_sum]
+      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
       refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, Fin.sum_univ_two, tFactor, wFun, Complex.mul_re, ht']
+      simp [c, i.2, Fin.sum_univ_two, expPolyFactors, Complex.mul_re]
       ring
     · refine Finset.sum_congr rfl fun i _ => ?_
-      simp only [B, expPoly_sum, expPoly_C_mul, Complex.re_sum]
+      simp only [A, expPoly_sum, expPoly_C_mul, Complex.re_sum]
       refine Finset.sum_congr rfl fun k _ => ?_
-      simp [c, i.2, tFactor, wFun, ht']
-  -- Each `B i` vanishes: directly for a complex rate; for a real rate its coefficients are real.
-  have hB0 : ∀ i, B i = 0 := by
-    intro i
-    rcases (hup i).lt_or_eq with hpos | hzero
-    · exact (eq_zero_of_sum_re_expPoly_eq_zero hinj hup B hB i).1 hpos
-    · have hre := (eq_zero_of_sum_re_expPoly_eq_zero hinj hup B hB i).2 hzero.symm
-      ext n
-      apply Complex.ext
-      · simpa using hre n
-      · simp only [B, finsetSum_coeff, coeff_C_mul, hasseDeriv_coeff, Complex.im_sum,
-          coeff_zero, Complex.zero_im]
-        refine Finset.sum_eq_zero fun k _ => ?_
-        simp [c, hzero.symm, (hwf i).2.2 hzero.symm]
+      simp [c, i.2, expPolyFactors]
+  have hA0 : (⟨A, hAr⟩ : realCoefficientFamilies (fun i => (comp i).rate)) = 0 :=
+    realExpPolySynthesis_injective _ hinj hup (hA.trans (map_zero _).symm)
+  have hc : ∀ i k, c i k = 0 := fun i =>
+    Fintype.linearIndependent_iff.mp (hQ i) (c i)
+      (by simpa only [A, smul_eq_C_mul, Submodule.coe_zero, Pi.zero_apply] using
+        congrFun (congrArg Subtype.val hA0) i)
   rintro (⟨⟨i, hi⟩, k, p⟩ | ⟨⟨i, hi⟩, k⟩)
-  · have hc := eq_zero_of_sum_hasseDeriv_eq_zero (hwf i).1 (c i) (hB0 i) k
-    simp only [c, hi, ↓reduceDIte] at hc
-    have hre := congrArg Complex.re hc
-    have him := congrArg Complex.im hc
-    simp at hre him
-    fin_cases p
-    · exact hre
-    · exact him
-  · have hc := eq_zero_of_sum_hasseDeriv_eq_zero (hwf i).1 (c i) (hB0 i) k
-    simpa [c, hi] using hc
+  · fin_cases p
+    · simpa [c, hi] using congrArg Complex.re (hc i k)
+    · simpa [c, hi, mul_eq_zero, hσ] using congrArg Complex.im (hc i k)
+  · simpa [c, hi] using hc i k
+
+/-- The functions `Re z`, `Im z` of `u` are linearly independent. -/
+lemma linearIndependent_uFactor (hinj : Function.Injective fun i => (comp i).rate)
+    (hup : ∀ i, 0 ≤ (comp i).rate.im) : LinearIndependent ℝ (uFactor comp) := by
+  have hQ (i : ι) :
+      LinearIndependent ℂ (fun k : Fin (comp i).multiplicity => (X : ℂ[X]) ^ (k : ℕ)) := by
+    simpa only [Function.comp_def, Submodule.subtype_apply, degreeLT.basis_val] using
+      (degreeLT.basis ℂ (comp i).multiplicity).linearIndependent.map'
+        (degreeLT ℂ (comp i).multiplicity).subtype (by simp)
+  simpa only [expPolyFactors, uFactor, zFun, one_mul] using
+    linearIndependent_expPolyFactors hinj hup _ hQ
+      (fun _ _ _ _ => by simp [apply_ite]) 1 one_ne_zero
+
+/-- The functions `Re w`, `- Im w` of `t` are linearly independent. -/
+lemma linearIndependent_tFactor (hinj : Function.Injective fun i => (comp i).rate)
+    (hwf : ∀ i, (comp i).WellFormed) : LinearIndependent ℝ (tFactor comp) := by
+  have hQ (i : ι) :
+      LinearIndependent ℂ (fun k : Fin (comp i).multiplicity => hasseDeriv k (comp i).poly) := by
+    exact linearIndependent_hasseDeriv (hwf i).1
+  simpa only [expPolyFactors, tFactor, wFun, neg_one_mul] using
+    linearIndependent_expPolyFactors hinj (fun i => (hwf i).2.1) _ hQ
+      (fun i hi k n => by simp [hasseDeriv_coeff, (hwf i).2.2 hi]) (-1) (by norm_num)
 
 /-- The number of rendering terms of a family is its total cost. -/
 lemma card_termIndex : Fintype.card (TermIndex comp) = ∑ i, (comp i).cost := by

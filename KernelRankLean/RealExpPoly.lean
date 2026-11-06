@@ -100,4 +100,49 @@ theorem eq_zero_of_sum_re_expPoly_eq_zero {ι : Type*} [Fintype ι] {rate : ι �
       Complex.zero_re] at h2
     linarith
 
+section Synthesis
+
+open NNReal
+
+variable {ι : Type*} [Fintype ι] (rate : ι → ℂ)
+
+/-- Polynomial families with real coefficients at real rates. -/
+def realCoefficientFamilies : Submodule ℝ (ι → ℂ[X]) where
+  carrier := {P | ∀ i, (rate i).im = 0 → ∀ k, ((P i).coeff k).im = 0}
+  zero_mem' := by simp
+  add_mem' := by
+    intro P Q hP hQ i hi k
+    simp [hP i hi k, hQ i hi k]
+  smul_mem' := by
+    intro c P hP i hi k
+    simp [coeff_smul, Complex.real_smul, hP i hi k]
+
+/-- Synthesis of a real exponential polynomial from its polynomial coefficients. -/
+noncomputable def realExpPolySynthesis :
+    realCoefficientFamilies rate →ₗ[ℝ] (ℝ≥0 → ℝ) where
+  toFun P u := ∑ i, (expPoly (P.1 i) (rate i) u).re
+  map_add' P Q := by ext u; simp [expPoly_add, Finset.sum_add_distrib]
+  map_smul' c P := by
+    ext u
+    simp [expPoly, eval_smul, Complex.real_smul, Finset.mul_sum, mul_assoc,
+      mul_sub, Finset.sum_sub_distrib]
+
+/-- Distinct rates in the closed upper half-plane uniquely determine their coefficients. -/
+theorem realExpPolySynthesis_injective (hinj : Function.Injective rate)
+    (hup : ∀ i, 0 ≤ (rate i).im) : Function.Injective (realExpPolySynthesis rate) := by
+  apply LinearMap.ker_eq_bot.mp
+  apply LinearMap.ker_eq_bot'.mpr
+  intro P hP
+  have h : ∀ u : ℝ, 0 < u → ∑ i, (expPoly (P.1 i) (rate i) u).re = 0 :=
+    fun u hu => congrFun hP ⟨u, hu.le⟩
+  apply Subtype.ext
+  funext i
+  rcases (hup i).lt_or_eq with hi | hi
+  · exact (eq_zero_of_sum_re_expPoly_eq_zero hinj hup P.1 h i).1 hi
+  · ext k
+    exact Complex.ext ((eq_zero_of_sum_re_expPoly_eq_zero hinj hup P.1 h i).2 hi.symm k)
+      (P.2 i hi.symm k)
+
+end Synthesis
+
 end KernelRank
