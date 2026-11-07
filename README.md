@@ -101,7 +101,6 @@ size, not mathematical complexity.
 | Revision | Change | Physical lines | Nonblank lines | Physical-line delta |
 |---|---|---:|---:|---:|
 | [`2e5ff3f`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/2e5ff3fd937e7bcd4bf1436dca334a77f64fd5ba) | Initial complete separable-rank proof | 1,370 | 1,194 | - |
-| [`0ff4980`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/0ff4980367aa57dab5e193f997d25ac215333337) | Trigger CI; no Lean changes | 1,370 | 1,194 | 0 |
 | [`0d9d939`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/0d9d93961eedd646b689786514d33255fac6c711) | Simplify translation continuity and semigroup smoothing | 1,316 | 1,142 | -54 |
 | [`83a404c`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/83a404c7298338065b70fdc39827671a1ec3b695) | Share real/imaginary independence through coefficient synthesis | 1,341 | 1,159 | +25 |
 | [`240dea0`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/240dea077b40a8aa9ce0e90ea13d8e546614f594) | Compute exact rank over the complex numbers; use conjugate expansion and scalar extension | 1,340 | 1,169 | -1 |
@@ -256,37 +255,33 @@ That revision uses Lean `v4.36.0-rc2` and Mathlib `v4.36.0-rc2` at commit
 
 ## Building
 
-### Lean
-
-With [elan](https://github.com/leanprover/elan) installed:
+The build is self-contained on Linux. From the repository root:
 
 ```
-lake exe cache get
-lake build
+scripts/setup
+scripts/check
+```
+
+`scripts/setup` installs [elan](https://github.com/leanprover/elan) (Lean) and
+[Isabelle2026](https://isabelle.in.tum.de/) into the ignored `.tmp/` directory, which also holds
+the Mathlib cache and all build outputs, and enables the repository's git hooks.
+
+`scripts/check` checks both proofs: the Lean build, that `sorry` occurs only in the draft
+`Experiments/NonstandardDraft.lean`, that the main theorems use only the axioms `propext`,
+`Classical.choice` and `Quot.sound`, the Isabelle build, and that the Isabelle theorem uses no
+oracle (such as `sorry`) and the theory adds no axioms. It records each passing check in
+`.tmp/checks/`, keyed by a hash of the exact input files. The pre-commit hook runs the same
+script on the staged files and repeats a check only if its inputs changed since it last passed.
+
+The first check downloads the Mathlib cache and builds Isabelle's `HOL-Analysis` heap, which
+took 9 minutes with 4 parallel jobs; after that, a full check takes under a minute.
+
+To run the tools directly, use the wrappers, which use the installation in `.tmp/`:
+
+```
+scripts/lake build
+scripts/isabelle build -d Isabelle KernelRank_NSA
 ```
 
 `lake build` builds both the `KernelRankLean` proof and the `Experiments` library. The
-``declaration uses `sorry` `` warnings all come from the draft `Experiments/NonstandardDraft.lean`.
-
-### Isabelle/HOL
-
-The Isabelle/HOL proof needs [Isabelle2026](https://isabelle.in.tum.de/):
-
-```
-isabelle build -d Isabelle KernelRank_NSA
-```
-
-The first build also builds the `HOL-Analysis` heap, which took 9 minutes with 4 parallel jobs;
-after that, checking the theory takes about 10 seconds.
-
-### Checks
-
-Alternatively, on Linux, `scripts/setup` installs elan and Isabelle
-into the ignored `.tmp/` directory, which then also holds the Mathlib cache and all build
-outputs, and enables the repository's git hooks. `scripts/check` then checks both proofs: the
-Lean build, that `sorry` occurs only in the draft, that the main theorems use only the axioms
-`propext`, `Classical.choice` and `Quot.sound`, the Isabelle build, and that the Isabelle
-theorem uses no oracle (such as `sorry`) and the theory adds no axioms. It records each passing
-check in `.tmp/checks/`, keyed by a hash of the exact input files. The pre-commit hook runs the
-same script on the staged files and repeats a check only if its inputs changed since it last
-passed.
+``declaration uses `sorry` `` warnings all come from the draft.
