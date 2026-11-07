@@ -1,0 +1,8 @@
+chapter "kernel-rank-lean"
+
+session "KernelRank_NSA" = "HOL-Analysis" +
+  description "A nonstandard proof that continuous one-parameter semigroups are exponentials."
+  sessions
+    "HOL-Nonstandard_Analysis"
+  theories
+    Semigroup_NSA
