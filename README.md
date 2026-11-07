@@ -26,8 +26,9 @@ states the classification on its own: the rank is finite exactly when `φ` is a 
 components on `[0, ∞)`.
 
 The proof in the `KernelRankLean` library is complete (no `sorry`); `#print axioms` reports
-only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library holds
-alternative proofs of one step and a draft, described [below](#alternative-proofs-of-the-semigroup-step).
+only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library and the `Isabelle`
+directory hold alternative proofs of one step and a draft, described
+[below](#alternative-proofs-of-the-semigroup-step).
 
 The kernel-rank definitions and row-span characterization also work over arbitrary fields and
 arbitrary index sets. `separableRank_ofReal` shows that allowing complex factors does not lower
@@ -74,8 +75,13 @@ The proof is in [KernelRankLean](KernelRankLean):
 | `Annihilator.lean` | Rank equals the least constant-coefficient differential-annihilator order |
 | `Main.lean` | The main theorems |
 
-[Experiments](Experiments) holds alternative proofs of the semigroup step and a draft, and
-[Isabelle](Isabelle) an Isabelle/HOL version of the nonstandard proof of that step (see below).
+Outside the proof:
+
+| Directory | Content |
+|---|---|
+| [Experiments](Experiments) | Lean library: alternative proofs of the semigroup step and a nonstandard draft |
+| [Isabelle](Isabelle) | Isabelle/HOL session `KernelRank_NSA`: a nonstandard proof of the semigroup step |
+| [scripts](scripts), [.githooks](.githooks) | Setup, tool wrappers, and the checks run before each commit |
 
 ## Commit history and Lean source size
 
@@ -102,7 +108,7 @@ size, not mathematical complexity.
 | [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 
-Later commits change only the `Experiments` library and this README, so the proof stays at
+Later commits do not change the `KernelRankLean` library, so the proof stays at
 1,587 lines. Deltas compare consecutive rows. Through `240dea0`, the proof is **30 physical lines and 25
 nonblank lines smaller** than the initial proof. Complexification saved 110 lines in the
 proof-specific parts, but its reusable infrastructure makes the whole change essentially
@@ -129,58 +135,74 @@ of the profile is such a semigroup, so this step produces the generator `A`.
 [Semigroup.lean](KernelRankLean/Semigroup.lean) proves it by smoothing with an integral. It
 works in any Banach algebra.
 
-The [Experiments](Experiments) folder holds two other complete proofs of this step, for
-finite-dimensional algebras, and a draft described in the next section. Both proofs start from the same bound: if `M` stays within `1/2` of `1`
-on `[0, δ]`, geometric sums bound the difference quotients `(M h - 1) / h` for `h = δ / n`.
+The alternatives below work in finite-dimensional algebras. They start from the same bound: if
+`M` stays within `1/2` of `1` on `[0, δ]`, geometric sums bound the difference quotients
+`(M h - 1) / h` for `h = δ / n`. The Lean versions share this bound,
+[GeneratorBound.lean](Experiments/GeneratorBound.lean), and
+[Translation.lean](Experiments/Translation.lean) applies them to the translation semigroup.
 
-* **Finite differences**
-  ([FiniteDifferenceSemigroup.lean](Experiments/FiniteDifferenceSemigroup.lean)). In finite
-  dimensions, a subsequence of the bounded quotients converges to some `A`. Along it, the
-  difference quotients of `M t * exp (-t A)` tend to `0` at every point. A mean-value theorem
-  for one-sided difference quotients then shows that this product is constant.
-* **Nonstandard analysis, after Euler**
-  ([NonstandardSemigroup.lean](Experiments/NonstandardSemigroup.lean)). Fix a positive
-  infinitesimal step `ε`. The quotient `(M ε - 1) / ε` is finite, so it has a standard part `A`.
-  Each step multiplies `M t * exp (-t A)` by a factor that differs from `1` by `ε` times an
-  infinitesimal. Over `⌊t / ε⌋` steps these changes add up to an infinitesimal, so the product
-  stays `1`. Hyperreals are sequences along an ultrafilter; Mathlib has no transfer principle,
-  so the proof works with those sequences directly. The ultrafilter makes the standard part
-  exist without extracting a subsequence.
+### Finite differences
 
-[Translation.lean](Experiments/Translation.lean) applies both to the translation semigroup.
-Both compile and have no unproved steps. Neither is shorter than the integral proof, so the
-main proof keeps it:
+[FiniteDifferenceSemigroup.lean](Experiments/FiniteDifferenceSemigroup.lean): in finite
+dimensions, a subsequence of the bounded quotients converges to some `A`. Along it, the
+difference quotients of `M t * exp (-t A)` tend to `0` at every point. A mean-value theorem for
+one-sided difference quotients then shows that this product is constant.
+
+### Nonstandard analysis, after Euler
+
+Fix a positive infinitesimal step `ε`. The quotient `(M ε - 1) / ε` is finite, so it has a
+standard part `A`. Each step multiplies `M t * exp (-t A)` by a factor that differs from `1` by
+`ε` times an infinitesimal. Over `⌊t / ε⌋` steps these changes add up to an infinitesimal, so
+the product stays `1`. The argument has three formalizations:
+
+* **Lean** ([NonstandardSemigroup.lean](Experiments/NonstandardSemigroup.lean)). Mathlib has
+  hyperreals, as sequences along an ultrafilter, but no transfer principle, so the proof works
+  with those sequences directly. The ultrafilter makes the standard part exist without
+  extracting a subsequence.
+* **Isabelle/HOL** ([Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy)). Isabelle's
+  `HOL-Nonstandard_Analysis` library provides hyperreals and nonstandard vectors as an
+  ultrapower, a `transfer` method, infinite closeness `≈`, standard parts of finite hyperreals,
+  and nonstandard characterizations of limits and continuity. Transfer turns the ordinary
+  bounds into statements about the infinitesimal step directly. The proof adds standard parts
+  of finite vectors in finite-dimensional (Heine–Borel) spaces, which the library lacks.
+* **Lean draft** ([NonstandardDraft.lean](Experiments/NonstandardDraft.lean)). The same proof
+  written the way a nonstandard analyst would, against a small hand-made interface: the
+  ultrapower `Hyp α` along `hyperfilter ℕ`, natural extensions `ext f`, internal membership,
+  and `x ≈ₕ y` for "infinitely close". 17 interface lemmas are left as `sorry`: one-variable
+  transfer, arithmetic of `≈ₕ`, standard parts in finite dimensions, continuity and
+  derivatives at infinitesimal scale, and `1 / ω ≈ 0`. These are the facts a nonstandard
+  analysis library would provide, and most would be short proofs about limits along the
+  ultrafilter. The proof of the semigroup theorem itself (91 lines) has no `sorry`. Being a
+  draft, it is built by `lake build` but its theorem depends on `sorryAx`; the main theorem
+  does not.
+
+### Comparison
+
+All but the draft compile with no unproved steps. None is shorter than the integral proof, so
+the main proof keeps it:
 
 | Proof of the semigroup step | Files | Physical lines | Nonblank lines |
 |---|---|---:|---:|
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
-| Nonstandard analysis | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
-| Nonstandard analysis, Isabelle/HOL | `Isabelle/Semigroup_NSA.thy` | 470 | 444 |
+| Nonstandard analysis, Lean | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
+| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 470 | 444 |
 
 The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each Lean alternative.
+The two nonstandard proofs split as follows (physical / nonblank lines):
 
-**In Isabelle/HOL.** Isabelle's `HOL-Nonstandard_Analysis` library provides hyperreals and
-nonstandard vectors as an ultrapower, a `transfer` method, infinite closeness `≈`, standard
-parts of finite hyperreals, and nonstandard characterizations of limits and continuity.
-[Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy) uses it to prove the same Euler argument, for
-finite-dimensional (Heine–Borel) real Banach algebras, with no unproved steps. Transfer turns
-the ordinary bounds into statements about the infinitesimal step directly. The file is longer
-than the Lean version:
-
-| Part of `Semigroup_NSA.thy` | Physical lines | Nonblank lines |
+| Part | Lean | Isabelle/HOL |
 |---|---:|---:|
-| Header and overview | 23 | 19 |
-| Ordinary analysis: bounded difference quotients, telescoping over `⌊t / h⌋` steps | 209 | 201 |
-| Standard parts of finite vectors (the library has them only for hyperreals) | 51 | 48 |
-| Euler's step | 142 | 135 |
-| The semigroup theorem | 45 | 41 |
-| Total | 470 | 444 |
+| Headers, imports and overview | 55 / 39 | 23 / 19 |
+| Ordinary analysis: bounded quotients, telescoping over `⌊t / h⌋` steps | 144 / 137 | 209 / 201 |
+| Nonstandard part: standard parts, Euler's step, the theorem | 90 / 87 | 238 / 224 |
+| Total | 289 / 263 | 470 / 444 |
 
 ## A purely nonstandard approach
 
-Nonstandard analysis suggests a different picture of the whole theorem: the continuous result is
-the standard part of a discrete one.
+Nonstandard analysis suggests a different picture of the whole theorem, not just the semigroup
+step: the continuous result is the standard part of a discrete one. None of it is formalized
+beyond the semigroup step above.
 
 **The theorem.** Since `x²` and `y²` range over `[0, ∞)`, the separable rank of `φ(x² + y²)` is
 the rank of the kernel `φ(s + t)` on `[0, ∞)²`. Fix an infinitesimal step `ε > 0` and an
@@ -196,30 +218,16 @@ points, by continuity, so `rank H ≥ r`.
 infinitesimal step, so it is close to the identity; write `S = 1 + εQ`. In a suitable basis,
 continuity and a geometric-sum bound make `Q` finite, so it has a standard part `A`. For
 standard `t`, after `n = ⌊t / ε⌋` steps, `φ(t) ≈ β Sⁿ v ≈ β exp (t A) v`, as in Euler's
-derivation of the exponential function. Generalized eigenvectors of `A` then give exponential
-polynomials, and the exact rank is algebra. Polynomial factors such as `t e^{μt}` appear as
-standard parts of combinations of nearly equal discrete roots, which is why multiplicities
-enter the cost.
+derivation of the exponential function; this is the semigroup argument above. Generalized
+eigenvectors of `A` then give exponential polynomials, and the exact rank is algebra.
+Polynomial factors such as `t e^{μt}` appear as standard parts of combinations of nearly equal
+discrete roots, which is why multiplicities enter the cost.
 
 **Why the main proof does not use it.** Mathlib has hyperreals but no transfer principle, so
 every transferred statement (ranks of hyperfinite matrices, internal spans) would need its own
 proof. Kronecker's theorem for finite Hankel matrices also has boundary cases that the infinite
 version avoids. The main proof gets the same realization for free: shifting acts on the span of
 the translates of `φ`.
-
-**A draft.** [NonstandardDraft.lean](Experiments/NonstandardDraft.lean) writes the analytic core,
-`S = 1 + εQ`, `A = st Q`, `Sⁿ ≈ exp (t A)`, in nonstandard language, for the continuous
-semigroup of the main proof. It does not formalize the hyperfinite Hankel matrix or Kronecker's
-theorem. It defines a small interface: the ultrapower `Hyp α` along `hyperfilter ℕ`, natural
-extensions `ext f`, internal membership, and `x ≈ₕ y` for "infinitely close". 17 of the
-interface lemmas are left as `sorry`:
-one-variable transfer, arithmetic of `≈ₕ`, standard parts in finite dimensions, continuity and
-derivatives at infinitesimal scale, and `1 / ω ≈ 0`. These are the facts a nonstandard analysis
-library would provide, and most would be short proofs about limits along the ultrafilter. The
-proof of the semigroup theorem itself (91 lines) has no `sorry`. It reuses the geometric-sum bound
-and the finite telescoping estimate `norm_telescope_le`, which are ordinary analysis. Being a
-draft, it is built by `lake build` but its theorem depends on `sorryAx`; the main theorem does
-not.
 
 ## Suggested kernel-optimizer citation
 
@@ -243,6 +251,8 @@ That revision uses Lean `v4.36.0-rc2` and Mathlib `v4.36.0-rc2` at commit
 
 ## Building
 
+### Lean
+
 With [elan](https://github.com/leanprover/elan) installed:
 
 ```
@@ -253,6 +263,8 @@ lake build
 `lake build` builds both the `KernelRankLean` proof and the `Experiments` library. The
 ``declaration uses `sorry` `` warnings all come from the draft `Experiments/NonstandardDraft.lean`.
 
+### Isabelle/HOL
+
 The Isabelle/HOL proof needs [Isabelle2026](https://isabelle.in.tum.de/):
 
 ```
@@ -262,7 +274,9 @@ isabelle build -d Isabelle KernelRank_NSA
 The first build also builds the `HOL-Analysis` heap, which took 9 minutes with 4 parallel jobs;
 after that, checking the theory takes about 10 seconds.
 
-**Self-contained checks.** Alternatively, on Linux, `scripts/setup` installs elan and Isabelle
+### Checks
+
+Alternatively, on Linux, `scripts/setup` installs elan and Isabelle
 into the ignored `.tmp/` directory, which then also holds the Mathlib cache and all build
 outputs, and enables the repository's git hooks. `scripts/check` then checks both proofs: the
 Lean build, that `sorry` occurs only in the draft, that the main theorems use only the axioms
