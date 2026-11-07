@@ -186,7 +186,7 @@ the main proof keeps it:
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
 | Nonstandard analysis, Lean | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
-| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 470 | 444 |
+| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 302 | 283 |
 
 The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each Lean alternative.
 The two nonstandard proofs split as follows (physical / nonblank lines):
@@ -194,9 +194,14 @@ The two nonstandard proofs split as follows (physical / nonblank lines):
 | Part | Lean | Isabelle/HOL |
 |---|---:|---:|
 | Headers, imports and overview | 55 / 39 | 23 / 19 |
-| Ordinary analysis: bounded quotients, telescoping over `⌊t / h⌋` steps | 144 / 137 | 209 / 201 |
-| Nonstandard part: standard parts, Euler's step, the theorem | 90 / 87 | 238 / 224 |
-| Total | 289 / 263 | 470 / 444 |
+| Ordinary analysis: bounded quotients, telescoping over `⌊t / h⌋` steps | 144 / 137 | 130 / 124 |
+| Nonstandard part: standard parts, Euler's step, the theorem | 90 / 87 | 149 / 140 |
+| Total | 289 / 263 | 302 / 283 |
+
+In Isabelle the ordinary analysis is shorter, helped by library lemmas on floors and
+geometric sums, but the nonstandard part is longer, mostly because it proves that finite
+vectors have standard parts (39 lines); the Lean proof gets them from convergence along the
+ultrafilter in Mathlib.
 
 ## A purely nonstandard approach
 
@@ -280,7 +285,8 @@ Alternatively, on Linux, `scripts/setup` installs elan and Isabelle
 into the ignored `.tmp/` directory, which then also holds the Mathlib cache and all build
 outputs, and enables the repository's git hooks. `scripts/check` then checks both proofs: the
 Lean build, that `sorry` occurs only in the draft, that the main theorems use only the axioms
-`propext`, `Classical.choice` and `Quot.sound`, and the Isabelle build. It records each passing
+`propext`, `Classical.choice` and `Quot.sound`, the Isabelle build, and that the Isabelle
+theorem uses no oracle (such as `sorry`) and the theory adds no axioms. It records each passing
 check in `.tmp/checks/`, keyed by a hash of the exact input files. The pre-commit hook runs the
 same script on the staged files and repeats a check only if its inputs changed since it last
 passed.

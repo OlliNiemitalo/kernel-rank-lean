@@ -31,6 +31,9 @@ lean_theorems=(
   Experiments.exists_translation_generator_nonstandard
 )
 allowed_axioms=(propext Classical.choice Quot.sound)
+# Isabelle theorems that must not depend on any oracle (`sorry` is the `skip_proof` oracle; an
+# oracle audit catches it even if the session enables `quick_and_dirty`).
+isabelle_theorems=(Semigroup_NSA.semigroup_eq_exp)
 
 staged=false
 force=false
@@ -129,15 +132,34 @@ check_lean() {
 }
 
 check_isabelle() {
-  local log="$checks/isabelle.log"
-  if ! "$repo/scripts/isabelle" build -d Isabelle -o timeout=600 KernelRank_NSA > "$log" 2>&1; then
-    "$repo/scripts/isabelle" build_log -H Error KernelRank_NSA >&2 || tail -40 "$log" >&2
-    echo "isabelle: build failed (full log: $log)" >&2
+  local log="$checks/isabelle.log" audit="$checks/isabelle-audit" bad name
+  bad="$(grep -nE '\<(axiomatization|axioms)\>' Isabelle/*.thy || true)"
+  if [ -n "$bad" ]; then
+    echo "$bad" >&2
+    echo "isabelle: new axioms are not allowed" >&2
+    return 1
+  fi
+  mkdir -p "$audit"
+  printf '%s\n' 'session KernelRank_NSA_Audit = KernelRank_NSA +' '  theories Audit' \
+    > "$audit/ROOT"
+  {
+    echo 'theory Audit imports KernelRank_NSA.Semigroup_NSA begin'
+    echo 'ML \<open>fun audit name thms = if null (Thm_Deps.all_oracles thms)'
+    echo '  then writeln (name ^ ": no oracles") else error (name ^ " depends on oracles")\<close>'
+    for name in "${isabelle_theorems[@]}"; do
+      echo "ML \<open>audit \"$name\" @{thms $name}\<close>"
+    done
+    echo 'end'
+  } > "$audit/Audit.thy"
+  if ! "$repo/scripts/isabelle" build -d Isabelle -d "$audit" -o timeout=600 \
+      KernelRank_NSA_Audit > "$log" 2>&1; then
+    tail -40 "$log" >&2
+    echo "isabelle: build or oracle audit failed (full log: $log)" >&2
     return 1
   fi
   "$repo/scripts/isabelle" build_log -H 'Warning|Legacy' -T KernelRank_NSA.Semigroup_NSA \
     KernelRank_NSA >> "$log" 2>&1 || true
-  echo "isabelle: session KernelRank_NSA builds"
+  echo "isabelle: session KernelRank_NSA builds; ${#isabelle_theorems[@]} theorem(s) use no oracles"
 }
 
 status=0

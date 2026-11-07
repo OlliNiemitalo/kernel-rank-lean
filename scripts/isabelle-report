@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Builds an Isabelle session and prints a short report: errors, commands that ran longer than
+# 20 s, and Sledgehammer suggestions. Full output goes to `.tmp/reports/<session>.{out,log}`.
+# For development only; the proofs are verified by `scripts/check`. Sessions that enable
+# `quick_and_dirty` are refused: state Sledgehammer goals as lemmas ending in `oops` instead.
+#
+#   scripts/isabelle-report DIR SESSION [extra `isabelle build` options...]
+#
+# Example: scripts/isabelle-report .tmp/sh SH
+set -uo pipefail
+here="$(dirname "${BASH_SOURCE[0]}")"
+source "$here/env.sh"
+dir="$1" session="$2"
+shift 2
+if grep -q quick_and_dirty "$dir/ROOT" || [[ " $* " == *quick_and_dirty* ]]; then
+  echo "isabelle-report: refusing quick_and_dirty (use lemmas ending in oops)" >&2
+  exit 2
+fi
+out_dir="$tmp/reports"
+mkdir -p "$out_dir"
+out="$out_dir/$session.out" log="$out_dir/$session.log"
+
+"$here/isabelle" build -v -d "$dir" "$@" "$session" > "$out" 2>&1
+status=$?
+"$here/isabelle" build_log -v "$session" > "$log" 2>&1
+
+echo "== $session: $(grep -E '^(Finished|Unfinished)' "$out" | head -1) (exit $status)"
+echo "== errors"
+grep -A8 -E '^\*\*\* (Failed|Type|Outer|Undefined|Bad|Inner|exception|Timeout)' "$out" |
+  grep -v '^--$' | head -80
+echo "== commands running over 20 s (line, seconds)"
+grep -o 'running for [0-9.]*s (line [0-9]*' "$out" |
+  awk '{t=$3; sub(/s/, "", t); if (t + 0 > m[$5]) m[$5] = t + 0}
+       END {for (l in m) print l, m[l]}' | sort -n
+echo "== sledgehammer suggestions"
+awk '/^Output \(line/ {l = $3} /Try this/ {p = 1} p {print l ": " $0} /\([0-9.]+ m?s\)$/ {p = 0}' \
+  "$log" | head -80
+exit $status

@@ -18,7 +18,18 @@
 
 ## Toolchain and commands
 
-- **Stay inside the repository.** Work from the repository root. All tools, caches, build
+- **Work with files, not long command lines.** Edit sources with the edit tool; put any
+  multi-step or reusable shell logic in a script file (under `scripts/` if useful to others,
+  else `.tmp/`) and run it with a short command. No long heredocs or inline Python in commands.
+- `scripts/isabelle-report DIR SESSION` builds a development session (for example a copy of
+  a theory in `.tmp/sh`) and prints errors, commands over 20 s, and Sledgehammer suggestions;
+  full output in `.tmp/reports/`. It is for development only; `scripts/check` is the
+  verification. Never use `quick_and_dirty` (the script refuses it): to ask Sledgehammer,
+  state each open goal as a standalone lemma ending in `oops` in a separate scratch session.
+  Sledgehammer only runs if no earlier command hangs, so set a session `timeout` and fix
+  slow commands first.
+- **Stay inside the repository.** Work from the repository root and never `cd` (not even into
+  `.tmp/` and back); use repository-relative paths instead. All tools, caches, build
   outputs and scratch files live under the ignored `.tmp/` directory, never elsewhere (such as
   `/tmp` or `~`), so commands need no extra approval. `scripts/env.sh` sets this up:
   `ELAN_HOME=.tmp/elan`, `XDG_CACHE_HOME` and `MATHLIB_CACHE_DIR` under `.tmp/cache`.
@@ -38,7 +49,12 @@
     `Experiments/NonstandardDraft.lean`, and `#print axioms` on the main theorems
     (`.tmp/checks/Axioms.lean`) must give only `propext`, `Classical.choice`, `Quot.sound`.
     Add new key theorems to `lean_theorems` in `scripts/check`.
-  - `isabelle`: `isabelle build -d Isabelle KernelRank_NSA` (fails on `sorry`).
+  - `isabelle`: builds `KernelRank_NSA`, then a generated session
+    (`.tmp/checks/isabelle-audit`) checks with `Thm_Deps.all_oracles` that the theorems in
+    `isabelle_theorems` use no oracle. This catches `sorry` (the `skip_proof` oracle) even if
+    `Isabelle/ROOT` enables `quick_and_dirty`, which a command-line `-o quick_and_dirty=false`
+    does not override. The words `axiomatization` and `axioms` are rejected anywhere in
+    `Isabelle/*.thy`, including comments.
 - Lean `leanprover/lean4:v4.36.0-rc2`, Mathlib `v4.36.0-rc2`
   (commit `9d581dfff2e41de989072ea63abf3daf69311520`). Do not change dependencies unless asked.
 - A single Lean module: `scripts/lake build KernelRankLean.ComplexRank`. A scratch file:
