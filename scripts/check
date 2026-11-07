@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Checks the Lean and Isabelle proofs, for regular work and as the pre-commit hook.
+#
+#   scripts/check [--staged] [--force] [lean] [isabelle]
+#
+# A component that passes gets a stamp `.tmp/checks/<component>.stamp` whose first line is a
+# key: a hash of the git blob ids of the component's input files (as in the working tree) and
+# of the tool version. A component whose key matches its stamp is not checked again. With
+# `--staged` (used by the hook), the inputs must have no unstaged or untracked changes, so the
+# checked files are exactly the files being committed. `--force` ignores the stamps.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+cd "$repo"
+checks="$tmp/checks"
+mkdir -p "$checks"
+
+common_inputs=(scripts/check scripts/env.sh)
+lean_inputs=('*.lean' lakefile.toml lake-manifest.json lean-toolchain scripts/lake)
+isabelle_inputs=(Isabelle/ROOT 'Isabelle/*.thy' scripts/isabelle)
+
+# Theorems whose axioms must be exactly the standard ones.
+lean_theorems=(
+  KernelRank.separableRank_radial_eq_iff
+  KernelRank.separableRank_radial_lt_top_iff_exists
+  KernelRank.exists_minimal_differential_annihilator
+  KernelRank.separableRank_sum_expPoly
+  KernelRank.exists_translation_generator
+  Experiments.exists_eq_exp_of_semigroup_finiteDifference
+  Experiments.exists_eq_exp_of_semigroup_nonstandard
+  Experiments.exists_translation_generator_finiteDifference
+  Experiments.exists_translation_generator_nonstandard
+)
+allowed_axioms=(propext Classical.choice Quot.sound)
+
+staged=false
+force=false
+components=()
+for arg in "$@"; do
+  case "$arg" in
+    --staged) staged=true ;;
+    --force) force=true ;;
+    lean | isabelle) components+=("$arg") ;;
+    *) echo "usage: scripts/check [--staged] [--force] [lean] [isabelle]" >&2; exit 2 ;;
+  esac
+done
+[ ${#components[@]} -gt 0 ] || components=(lean isabelle)
+
+inputs() {
+  local -n specs="${1}_inputs"
+  printf '%s\n' "${common_inputs[@]}" "${specs[@]}"
+}
+
+tool_version() {
+  case "$1" in
+    lean) cat lean-toolchain ;;
+    isabelle) "$repo/scripts/isabelle" version ;;
+  esac
+}
+
+key() {
+  local specs
+  mapfile -t specs < <(inputs "$1")
+  {
+    tool_version "$1"
+    git ls-files -co --exclude-standard --deduplicate -- "${specs[@]}" | sort |
+      while IFS= read -r f; do
+        [ -e "$f" ] && printf '%s %s\n' "$(git hash-object -- "$f")" "$f"
+      done
+  } | sha256sum | cut -d' ' -f1
+}
+
+require_staged() {
+  local specs untracked
+  mapfile -t specs < <(inputs "$1")
+  untracked="$(git ls-files -o --exclude-standard -- "${specs[@]}")"
+  if ! git diff --quiet -- "${specs[@]}" || [ -n "$untracked" ]; then
+    echo "$1: inputs have unstaged or untracked changes; stage or stash them first:" >&2
+    git status --short -- "${specs[@]}" >&2
+    return 1
+  fi
+}
+
+check_lean() {
+  local log="$checks/lean.log" audit="$checks/Axioms.lean" out bad
+  # Errors are handled explicitly: `set -e` does not apply inside `if summary="$(...)"`.
+  if ! "$repo/scripts/lake" exe cache get > "$log" 2>&1; then
+    tail -20 "$log" >&2
+    echo "lean: lake exe cache get failed" >&2
+    return 1
+  fi
+  if ! "$repo/scripts/lake" build >> "$log" 2>&1; then
+    grep -E 'error' "$log" | head -40 >&2
+    echo "lean: lake build failed (full log: $log)" >&2
+    return 1
+  fi
+  bad="$(grep -E 'declaration uses .sorry.' "$log" | grep -v 'Experiments/NonstandardDraft.lean' || true)"
+  if [ -n "$bad" ]; then
+    echo "$bad" >&2
+    echo "lean: sorry outside the draft Experiments/NonstandardDraft.lean" >&2
+    return 1
+  fi
+  {
+    echo 'import KernelRankLean'
+    echo 'import Experiments'
+    printf '#print axioms %s\n' "${lean_theorems[@]}"
+  } > "$audit"
+  out="$("$repo/scripts/lake" env lean "$audit" 2>&1 | tr '\n' ' ' | tr -s ' ')"
+  local ok=0 name axioms a re
+  for name in "${lean_theorems[@]}"; do
+    re="'${name//./\\.}' depends on axioms: \[([^]]*)\]"
+    if [[ $out =~ $re ]]; then
+      axioms="${BASH_REMATCH[1]}"
+    elif [[ $out == *"'$name' does not depend on any axioms"* ]]; then
+      axioms=""
+    else
+      echo "lean: no axiom report for $name: $out" >&2
+      return 1
+    fi
+    for a in ${axioms//,/ }; do
+      if [[ ! " ${allowed_axioms[*]} " =~ " $a " ]]; then
+        echo "lean: $name depends on $a" >&2
+        return 1
+      fi
+    done
+    echo "$name: $axioms" >> "$log"
+    ok=$((ok + 1))
+  done
+  echo "lean: lake build passed; $ok theorems use only ${allowed_axioms[*]}"
+}
+
+check_isabelle() {
+  local log="$checks/isabelle.log"
+  if ! "$repo/scripts/isabelle" build -d Isabelle -o timeout=600 KernelRank_NSA > "$log" 2>&1; then
+    "$repo/scripts/isabelle" build_log -H Error KernelRank_NSA >&2 || tail -40 "$log" >&2
+    echo "isabelle: build failed (full log: $log)" >&2
+    return 1
+  fi
+  "$repo/scripts/isabelle" build_log -H 'Warning|Legacy' -T KernelRank_NSA.Semigroup_NSA \
+    KernelRank_NSA >> "$log" 2>&1 || true
+  echo "isabelle: session KernelRank_NSA builds"
+}
+
+status=0
+for c in "${components[@]}"; do
+  if $staged && ! require_staged "$c"; then
+    status=1
+    continue
+  fi
+  k="$(key "$c")"
+  stamp="$checks/$c.stamp"
+  if ! $force && [ -f "$stamp" ] && [ "$(head -1 "$stamp")" = "$k" ]; then
+    echo "$c: up to date (checked $(sed -n 2p "$stamp"))"
+    continue
+  fi
+  echo "$c: checking..."
+  start=$SECONDS
+  if summary="$("check_$c")"; then
+    printf '%s\n%s\n%s\n' "$k" "$(date -Iseconds)" "$summary" > "$stamp"
+    echo "$summary ($((SECONDS - start)) s)"
+  else
+    rm -f "$stamp"
+    status=1
+  fi
+done
+exit $status

@@ -74,6 +74,9 @@ The proof is in [KernelRankLean](KernelRankLean):
 | `Annihilator.lean` | Rank equals the least constant-coefficient differential-annihilator order |
 | `Main.lean` | The main theorems |
 
+[Experiments](Experiments) holds alternative proofs of the semigroup step and a draft, and
+[Isabelle](Isabelle) an Isabelle/HOL version of the nonstandard proof of that step (see below).
+
 ## Commit history and Lean source size
 
 These counts include **every `.lean` file of the `KernelRankLean` library**, including its root
@@ -153,8 +156,26 @@ main proof keeps it:
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
 | Nonstandard analysis | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
+| Nonstandard analysis, Isabelle/HOL | `Isabelle/Semigroup_NSA.thy` | 470 | 444 |
 
-The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each alternative.
+The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each Lean alternative.
+
+**In Isabelle/HOL.** Isabelle's `HOL-Nonstandard_Analysis` library provides hyperreals and
+nonstandard vectors as an ultrapower, a `transfer` method, infinite closeness `≈`, standard
+parts of finite hyperreals, and nonstandard characterizations of limits and continuity.
+[Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy) uses it to prove the same Euler argument, for
+finite-dimensional (Heine–Borel) real Banach algebras, with no unproved steps. Transfer turns
+the ordinary bounds into statements about the infinitesimal step directly. The file is longer
+than the Lean version:
+
+| Part of `Semigroup_NSA.thy` | Physical lines | Nonblank lines |
+|---|---:|---:|
+| Header and overview | 23 | 19 |
+| Ordinary analysis: bounded difference quotients, telescoping over `⌊t / h⌋` steps | 209 | 201 |
+| Standard parts of finite vectors (the library has them only for hyperreals) | 51 | 48 |
+| Euler's step | 142 | 135 |
+| The semigroup theorem | 45 | 41 |
+| Total | 470 | 444 |
 
 ## A purely nonstandard approach
 
@@ -222,10 +243,30 @@ That revision uses Lean `v4.36.0-rc2` and Mathlib `v4.36.0-rc2` at commit
 
 ## Building
 
+With [elan](https://github.com/leanprover/elan) installed:
+
 ```
 lake exe cache get
 lake build
 ```
 
 `lake build` builds both the `KernelRankLean` proof and the `Experiments` library. The
-`declaration uses 'sorry'` warnings all come from the draft `Experiments/NonstandardDraft.lean`.
+``declaration uses `sorry` `` warnings all come from the draft `Experiments/NonstandardDraft.lean`.
+
+The Isabelle/HOL proof needs [Isabelle2026](https://isabelle.in.tum.de/):
+
+```
+isabelle build -d Isabelle KernelRank_NSA
+```
+
+The first build also builds the `HOL-Analysis` heap, which took 9 minutes with 4 parallel jobs;
+after that, checking the theory takes about 10 seconds.
+
+**Self-contained checks.** Alternatively, on Linux, `scripts/setup` installs elan and Isabelle
+into the ignored `.tmp/` directory, which then also holds the Mathlib cache and all build
+outputs, and enables the repository's git hooks. `scripts/check` then checks both proofs: the
+Lean build, that `sorry` occurs only in the draft, that the main theorems use only the axioms
+`propext`, `Classical.choice` and `Quot.sound`, and the Isabelle build. It records each passing
+check in `.tmp/checks/`, keyed by a hash of the exact input files. The pre-commit hook runs the
+same script on the staged files and repeats a check only if its inputs changed since it last
+passed.

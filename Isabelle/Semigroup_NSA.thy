@@ -4,6 +4,8 @@ theory Semigroup_NSA
     "HOL-Nonstandard_Analysis.Nonstandard_Analysis"
 begin
 
+no_notation eqpoll (infixl \<open>\<approx>\<close> 50)
+
 text \<open>
   A nonstandard proof, after Euler, that a one-parameter semigroup \<open>M\<close> that is continuous on
   \<open>[0, \<infinity>)\<close> is an exponential, \<open>M t = exp (t A)\<close>, in a finite-dimensional
@@ -11,11 +13,11 @@ text \<open>
 
   \<^enum> The difference quotients \<open>(M h - 1) / h\<close> along \<open>h = \<delta> / n\<close> are bounded
     (geometric sums; ordinary analysis).
-  \<^enum> By transfer, \<open>(M \<epsilon> - 1) / \<epsilon>\<close> is finite for the infinitesimal
-    \<open>\<epsilon> = \<delta> / \<omega>\<close>, so it has a standard part \<open>A\<close>.
-  \<^enum> Each step of size \<open>\<epsilon>\<close> multiplies \<open>M s * exp (- s A)\<close> by a factor
-    that differs from \<open>1\<close> by \<open>\<epsilon>\<close> times an infinitesimal. Over
-    \<open>\<lfloor>t / \<epsilon>\<rfloor>\<close> steps the changes add up to an infinitesimal
+  \<^enum> By transfer, \<open>(M \<eta> - 1) / \<eta>\<close> is finite for the infinitesimal
+    \<open>\<eta> = \<delta> / \<omega>\<close>, so it has a standard part \<open>A\<close>.
+  \<^enum> Each step of size \<open>\<eta>\<close> multiplies \<open>M s * exp (- s A)\<close> by a factor
+    that differs from \<open>1\<close> by \<open>\<eta>\<close> times an infinitesimal. Over
+    \<open>\<lfloor>t / \<eta>\<rfloor>\<close> steps the changes add up to an infinitesimal
     (a transferred telescoping estimate), so the product stays \<open>1\<close>.
 \<close>
 
@@ -35,7 +37,7 @@ next
   have "0 \<le> real n * h" using \<open>0 \<le> h\<close> by simp
   then have "M (real (Suc n) * h) = M (real n * h) * M h"
     using add[of "real n * h" h] \<open>0 \<le> h\<close> by (simp add: algebra_simps)
-  then show ?case using Suc by (simp add: power_Suc2)
+  then show ?case using Suc by (simp add: power_commutes)
 qed
 
 lemma geom_telescope:
@@ -76,7 +78,7 @@ proof -
   also have "\<dots> \<le> (1 / real n) * (\<Sum>k<n. norm (1 - x ^ k))"
     by (intro mult_left_mono norm_sum) simp
   also have "\<dots> \<le> (1 / real n) * (\<Sum>k<n. 1 / 2)"
-    by (intro mult_left_mono sum_mono) (auto simp: norm_minus_commute near)
+    using near by (intro mult_left_mono sum_mono) (simp_all add: norm_minus_commute)
   also have "\<dots> = 1 / 2"
     using \<open>0 < n\<close> by simp
   finally have hq: "norm (1 - q) \<le> 1 / 2" .
@@ -89,7 +91,7 @@ proof -
   moreover have "norm d * norm (1 - q) \<le> norm d * (1 / 2)"
     using hq by (intro mult_left_mono) simp_all
   ultimately have "norm d \<le> norm (x ^ n - 1) + norm d * (1 / 2)"
-    using dq by linarith
+    unfolding dq[symmetric] by linarith
   then show ?thesis
     by (simp add: d_def)
 qed
@@ -128,7 +130,7 @@ proof -
     have "0 < h" using \<open>\<delta> > 0\<close> by (simp add: h_def m_def)
     have mh: "real m * h = \<delta>" by (simp add: h_def m_def)
     have pow: "M h ^ k = M (real k * h)" for k
-      using semigroup_pow[OF M0 add, of h k] \<open>0 < h\<close> by simp
+      using semigroup_pow[of M h k, OF M0 add] \<open>0 < h\<close> by simp
     have steps: "norm (M h ^ k - 1) \<le> 1 / 2" if "k < m" for k
     proof -
       have "real k * h \<le> real m * h"
@@ -137,7 +139,7 @@ proof -
         unfolding pow using \<open>0 < h\<close> mh by (intro near) simp_all
     qed
     have "norm (real m *\<^sub>R (M h - 1)) \<le> 2 * norm (M h ^ m - 1)"
-      by (rule geometric_quotient_bound) (simp_all add: m_def steps)
+      by (rule geometric_quotient_bound[OF _ steps]) (simp add: m_def)
     then have "norm (real m *\<^sub>R (M h - 1)) \<le> 2 * norm (M \<delta> - 1)"
       by (simp add: pow mh)
     moreover have "norm ((1 / h) *\<^sub>R (M h - 1)) = norm (real m *\<^sub>R (M h - 1)) / \<delta>"
@@ -158,12 +160,12 @@ proof -
     by simp
   have "t / h < real_of_int \<lfloor>t / h\<rfloor> + 1" by simp
   then have "t < (real_of_int \<lfloor>t / h\<rfloor> + 1) * h"
-    using \<open>0 < h\<close> by (simp add: pos_divide_less_eq)
+    using \<open>0 < h\<close> by (simp only: pos_divide_less_eq)
   then show "t - h \<le> real (nat \<lfloor>t / h\<rfloor>) * h"
     by (simp add: eq algebra_simps)
   have "real_of_int \<lfloor>t / h\<rfloor> \<le> t / h" by simp
   then show "real (nat \<lfloor>t / h\<rfloor>) * h \<le> t"
-    using \<open>0 < h\<close> by (simp add: eq pos_le_divide_eq)
+    using \<open>0 < h\<close> by (simp only: eq pos_le_divide_eq)
 qed
 
 text \<open>Telescoping over \<open>\<lfloor>t / h\<rfloor>\<close> steps of size \<open>h\<close>.\<close>
@@ -203,13 +205,13 @@ proof -
   also have "\<dots> = (\<Sum>j<K. M (real j * h) * (M h * E h - 1) * E (real j * h))"
     by (simp add: step)
   finally have tel: "F K - 1 = (\<Sum>j<K. M (real j * h) * (M h * E h - 1) * E (real j * h))" .
-  have term: "norm (M (real j * h) * (M h * E h - 1) * E (real j * h))
+  have summand: "norm (M (real j * h) * (M h * E h - 1) * E (real j * h))
       \<le> C * norm (M h * E h - 1) * D" if "j \<in> {..<K}" for j
   proof -
-    have "real j * h \<le> real K * h"
+    have jK: "real j * h \<le> real K * h"
       using that \<open>0 < h\<close> by (intro mult_right_mono) simp_all
-    then have js: "real j * h \<in> {0..t}"
-      using Kh \<open>0 < h\<close> by simp
+    have js: "real j * h \<in> {0..t}"
+      using order_trans[OF jK Kh] \<open>0 < h\<close> by simp
     have "norm (M (real j * h) * (M h * E h - 1) * E (real j * h))
         \<le> norm (M (real j * h)) * norm (M h * E h - 1) * norm (E (real j * h))"
       by (rule order_trans[OF norm_mult_ineq mult_right_mono[OF norm_mult_ineq norm_ge_zero]])
@@ -219,9 +221,9 @@ proof -
     finally show ?thesis .
   qed
   have "norm (F K - 1) \<le> (\<Sum>j<K. C * norm (M h * E h - 1) * D)"
-    unfolding tel by (rule order_trans[OF norm_sum sum_mono]) (rule term)
+    unfolding tel by (rule order_trans[OF norm_sum sum_mono]) (rule summand)
   also have "\<dots> = real K * h * (C * D * norm ((1 / h) *\<^sub>R (M h * E h - 1)))"
-    using \<open>0 < h\<close> by (simp add: field_simps)
+    using \<open>0 < h\<close> by (simp add: abs_of_pos)
   also have "\<dots> \<le> t * (C * D * norm ((1 / h) *\<^sub>R (M h * E h - 1)))"
     using Kh C0 D0 by (intro mult_right_mono) simp_all
   finally show ?thesis
@@ -282,7 +284,7 @@ qed
 section \<open>Euler's step\<close>
 
 text \<open>
-  If \<open>\<epsilon>\<close> is a positive infinitesimal and \<open>(M \<epsilon> - 1) / \<epsilon>\<close> is
+  If \<open>\<eta>\<close> is a positive infinitesimal and \<open>(M \<eta> - 1) / \<eta>\<close> is
   infinitely close to \<open>A\<close>, then \<open>M t = exp (t A)\<close>.
 \<close>
 
@@ -290,8 +292,8 @@ lemma euler_step:
   fixes M :: "real \<Rightarrow> 'a::{real_normed_algebra_1, banach}" and A :: 'a
   assumes cont: "continuous_on {0..} M" and M0: "M 0 = 1"
     and add: "\<And>s t. 0 \<le> s \<Longrightarrow> 0 \<le> t \<Longrightarrow> M (s + t) = M s * M t"
-    and eps: "\<epsilon> \<in> Infinitesimal" "0 < \<epsilon>"
-    and gen: "( *f* (\<lambda>h. (1 / h) *\<^sub>R (M h - 1))) \<epsilon> \<approx> star_of A"
+    and eps: "\<eta> \<in> Infinitesimal" "0 < \<eta>"
+    and gen: "( *f* (\<lambda>h. (1 / h) *\<^sub>R (M h - 1))) \<eta> \<approx> star_of A"
     and "0 \<le> t"
   shows "M t = exp (t *\<^sub>R A)"
 proof (cases "t = 0")
@@ -303,12 +305,7 @@ next
   define E :: "real \<Rightarrow> 'a" where "E = (\<lambda>s. exp (s *\<^sub>R - A))"
   have E0: "E 0 = 1" by (simp add: E_def)
   have Eadd: "E (s + u) = E s * E u" for s u
-  proof -
-    have "(s *\<^sub>R - A) * (u *\<^sub>R - A) = (u *\<^sub>R - A) * (s *\<^sub>R - A)"
-      by (simp add: algebra_simps)
-    then show ?thesis
-      by (simp add: E_def scaleR_add_left exp_add_commuting)
-  qed
+    unfolding E_def scaleR_add_left by (rule exp_add_commuting) (simp add: algebra_simps)
   have Ederiv: "(E has_vector_derivative exp (s *\<^sub>R - A) * - A) (at s)" for s
     using exp_scaleR_has_vector_derivative_right[of "- A" s UNIV] by (simp add: E_def)
   have Econt: "isCont E s" for s
@@ -316,17 +313,22 @@ next
   define F where "F = (\<lambda>s. M s * E s)"
   obtain C where C: "\<And>s. s \<in> {0..t} \<Longrightarrow> norm (M s) \<le> C"
   proof -
-    have "compact (M ` {0..t})"
-      by (rule compact_continuous_image[OF continuous_on_subset[OF cont]]) auto
+    have "bounded (M ` {0..t})"
+      by (intro compact_imp_bounded compact_continuous_image continuous_on_subset[OF cont]) auto
+    then obtain a where "\<forall>x \<in> M ` {0..t}. norm x \<le> a"
+      unfolding bounded_iff ..
     then show ?thesis
-      using that by (auto dest!: compact_imp_bounded simp: bounded_iff)
+      by (intro that[of a]) auto
   qed
   obtain D where D: "\<And>s. s \<in> {0..t} \<Longrightarrow> norm (E s) \<le> D"
   proof -
-    have "compact (E ` {0..t})"
-      by (rule compact_continuous_image) (auto intro: continuous_at_imp_continuous_on Econt)
+    have "bounded (E ` {0..t})"
+      by (intro compact_imp_bounded compact_continuous_image)
+        (auto intro: continuous_at_imp_continuous_on Econt)
+    then obtain a where "\<forall>x \<in> E ` {0..t}. norm x \<le> a"
+      unfolding bounded_iff ..
     then show ?thesis
-      using that by (auto dest!: compact_imp_bounded simp: bounded_iff)
+      by (intro that[of a]) auto
   qed
   define Q where "Q = (\<lambda>h::real. (1 / h) *\<^sub>R (M h - 1))"
   define DE where "DE = (\<lambda>h::real. (1 / h) *\<^sub>R (E h - 1))"
@@ -334,7 +336,7 @@ next
   have G_split: "G = (\<lambda>h. Q h * E h + DE h)"
     by (simp add: fun_eq_iff G_def Q_def DE_def algebra_simps)
 
-  txt \<open>At infinitesimal scale, \<open>(exp (- \<epsilon> A) - 1) / \<epsilon> \<approx> - A\<close>.\<close>
+  txt \<open>At infinitesimal scale, \<open>(exp (- \<eta> A) - 1) / \<eta> \<approx> - A\<close>.\<close>
   define r where "r = (\<lambda>h::real. norm (E (0 + h) - E 0 - h *\<^sub>R - A) / norm h)"
   have "(E has_derivative (\<lambda>h. h *\<^sub>R - A)) (at 0)"
     using Ederiv[of 0] by (simp add: has_vector_derivative_def)
@@ -349,73 +351,76 @@ next
     then have "DE h - - A = (1 / h) *\<^sub>R (E (0 + h) - E 0 - h *\<^sub>R - A)"
       by (simp add: DE_def E0 algebra_simps)
     then show "norm (DE h - - A) = r h"
-      by (simp add: r_def divide_inverse abs_inverse mult.commute)
+      by (simp add: r_def divide_inverse mult.commute)
   qed
   have "\<forall>h. h \<noteq> 0 \<longrightarrow> hnorm (( *f* DE) h - star_of (- A)) = ( *f* r) h"
     using DE_r by transfer
-  moreover have "\<epsilon> \<noteq> star_of 0" "\<epsilon> \<approx> star_of 0"
+  moreover have "\<eta> \<noteq> star_of 0" "\<eta> \<approx> star_of 0"
     using eps by (simp_all add: mem_infmal_iff)
-  ultimately have "hnorm (( *f* DE) \<epsilon> - star_of (- A)) \<approx> 0"
+  ultimately have "hnorm (( *f* DE) \<eta> - star_of (- A)) \<approx> 0"
     using r_ns unfolding NSLIM_def by auto
-  then have DE_lim: "( *f* DE) \<epsilon> \<approx> star_of (- A)"
+  then have DE_lim: "( *f* DE) \<eta> \<approx> star_of (- A)"
     by (simp add: approx_def mem_infmal_iff[symmetric] Infinitesimal_hnorm_iff)
 
-  txt \<open>One step changes \<open>M s * E s\<close> by \<open>\<epsilon>\<close> times an infinitesimal.\<close>
-  have E_eps: "( *f* E) \<epsilon> \<approx> star_of 1"
-    using isCont_isNSCont[OF Econt[of 0]] \<open>\<epsilon> \<approx> star_of 0\<close> E0
+  txt \<open>One step changes \<open>M s * E s\<close> by \<open>\<eta>\<close> times an infinitesimal.\<close>
+  have E_eps: "( *f* E) \<eta> \<approx> star_of 1"
+    using isCont_isNSCont[OF Econt[of 0]] \<open>\<eta> \<approx> star_of 0\<close> E0
     unfolding isNSCont_def by auto
-  have "( *f* G) \<epsilon> = ( *f* Q) \<epsilon> * ( *f* E) \<epsilon> + ( *f* DE) \<epsilon>"
-    by (simp add: G_split starfun_mult[symmetric] starfun_add[symmetric])
-  moreover have "( *f* Q) \<epsilon> * ( *f* E) \<epsilon> + ( *f* DE) \<epsilon> \<approx> star_of A * star_of 1 + star_of (- A)"
+  have "( *f* G) \<eta> = ( *f* Q) \<eta> * ( *f* E) \<eta> + ( *f* DE) \<eta>"
+    by (simp add: G_split)
+  moreover have "( *f* Q) \<eta> * ( *f* E) \<eta> + ( *f* DE) \<eta> \<approx> star_of A * star_of 1 + star_of (- A)"
     using gen E_eps DE_lim unfolding Q_def by (intro approx_add approx_mult_star_of)
-  ultimately have G_inf: "( *f* G) \<epsilon> \<in> Infinitesimal"
-    by (simp add: mem_infmal_iff star_of_minus)
+  ultimately have G_inf: "( *f* G) \<eta> \<in> Infinitesimal"
+    by (simp add: mem_infmal_iff)
 
-  txt \<open>Over \<open>\<lfloor>t / \<epsilon>\<rfloor>\<close> steps the changes add up to an infinitesimal.\<close>
+  txt \<open>Over \<open>\<lfloor>t / \<eta>\<rfloor>\<close> steps the changes add up to an infinitesimal.\<close>
   define K where "K = (\<lambda>h::real. real (nat \<lfloor>t / h\<rfloor>) * h)"
   have "\<forall>h. 0 < h \<longrightarrow> norm (F (K h) - 1) \<le> t * C * D * norm (G h)"
-    using telescope_bound[OF M0 E0 add Eadd \<open>0 \<le> t\<close> C D] by (simp add: F_def K_def G_def)
+    using telescope_bound[of M E, OF M0 E0 add Eadd \<open>0 \<le> t\<close> C D] by (simp add: F_def K_def G_def)
   then have "\<forall>h. 0 < h \<longrightarrow>
       hnorm (( *f* (\<lambda>h. F (K h) - 1)) h) \<le> star_of (t * C * D) * hnorm (( *f* G) h)"
     by transfer
-  then have "hnorm (( *f* (\<lambda>h. F (K h) - 1)) \<epsilon>) \<le> star_of (t * C * D) * hnorm (( *f* G) \<epsilon>)"
+  then have FK_le: "hnorm (( *f* (\<lambda>h. F (K h) - 1)) \<eta>) \<le> star_of (t * C * D) * hnorm (( *f* G) \<eta>)"
     using eps by blast
-  moreover have "star_of (t * C * D) * hnorm (( *f* G) \<epsilon>) \<in> Infinitesimal"
+  have "star_of (t * C * D) * hnorm (( *f* G) \<eta>) \<in> Infinitesimal"
     using G_inf by (intro Infinitesimal_star_of_mult2) (simp add: Infinitesimal_hnorm_iff)
-  ultimately have "hnorm (( *f* (\<lambda>h. F (K h) - 1)) \<epsilon>) \<in> Infinitesimal"
-    by (intro Infinitesimal_interval2[OF _ Infinitesimal_zero]) simp_all
-  then have FK: "( *f* (\<lambda>h. F (K h) - 1)) \<epsilon> \<approx> 0"
-    by (simp add: Infinitesimal_hnorm_iff mem_infmal_iff)
+  then have "hnorm (( *f* (\<lambda>h. F (K h) - 1)) \<eta>) \<in> Infinitesimal"
+    using Infinitesimal_interval2[OF _ Infinitesimal_zero _ FK_le] by simp
+  then have FK: "( *f* (\<lambda>h. F (K h) - 1)) \<eta> \<approx> 0"
+    by (simp add: Infinitesimal_hnorm_iff mem_infmal_iff[symmetric])
 
-  txt \<open>\<open>\<lfloor>t / \<epsilon>\<rfloor> \<epsilon> \<approx> t\<close>, and \<open>M s * E s\<close> is continuous at \<open>t\<close>.\<close>
+  txt \<open>\<open>\<lfloor>t / \<eta>\<rfloor> \<eta> \<approx> t\<close>, and \<open>M s * E s\<close> is continuous at \<open>t\<close>.\<close>
   have "\<forall>h. 0 < h \<longrightarrow> star_of t - h \<le> ( *f* K) h \<and> ( *f* K) h \<le> star_of t"
-    by transfer (simp add: K_def floor_step \<open>0 \<le> t\<close>)
-  then have "star_of t - \<epsilon> \<le> ( *f* K) \<epsilon>" "( *f* K) \<epsilon> \<le> star_of t"
+    by transfer (auto simp only: K_def intro: floor_step[OF \<open>0 \<le> t\<close>])
+  then have K1: "star_of t - \<eta> \<le> ( *f* K) \<eta>" and K2: "( *f* K) \<eta> \<le> star_of t"
     using eps by blast+
-  then have "star_of t - ( *f* K) \<epsilon> \<in> Infinitesimal"
-    using eps by (intro Infinitesimal_interval2[of \<epsilon> 0]) simp_all
-  then have K_approx: "( *f* K) \<epsilon> \<approx> star_of t"
-    by (simp add: approx_def Infinitesimal_minus_iff[symmetric])
+  have "star_of t - ( *f* K) \<eta> \<in> Infinitesimal"
+    by (rule Infinitesimal_interval2[of \<eta> 0]) (use eps K1 K2 in \<open>simp_all add: algebra_simps\<close>)
+  then have "star_of t \<approx> ( *f* K) \<eta>"
+    by (simp add: approx_def)
+  then have K_approx: "( *f* K) \<eta> \<approx> star_of t"
+    by (rule approx_sym)
   have "isCont M t"
     using continuous_on_interior[OF cont] \<open>0 < t\<close> by simp
   then have "isCont F t"
     unfolding F_def using Econt by simp
-  then have "( *f* F) (( *f* K) \<epsilon>) \<approx> star_of (F t)"
+  then have "( *f* F) (( *f* K) \<eta>) \<approx> star_of (F t)"
     using K_approx unfolding isNSCont_isCont_iff[symmetric] isNSCont_def by blast
-  moreover have "( *f* F) (( *f* K) \<epsilon>) = ( *f* (\<lambda>h. F (K h) - 1)) \<epsilon> + 1"
+  moreover have "\<forall>h. ( *f* F) (( *f* K) h) = ( *f* (\<lambda>h. F (K h) - 1)) h + 1"
     by transfer simp
-  moreover have "( *f* (\<lambda>h. F (K h) - 1)) \<epsilon> + 1 \<approx> 0 + 1"
+  then have "( *f* F) (( *f* K) \<eta>) = ( *f* (\<lambda>h. F (K h) - 1)) \<eta> + 1" ..
+  moreover have "( *f* (\<lambda>h. F (K h) - 1)) \<eta> + 1 \<approx> 0 + 1"
     using FK by (rule approx_add) simp
   ultimately have "star_of (F t) \<approx> star_of 1"
-    by (simp add: approx_sym approx_trans3)
+    by (metis approx_sym approx_trans add_0 star_of_one)
   then have F1: "M t * exp (t *\<^sub>R - A) = 1"
-    by (simp add: F_def E_def)
+    by (simp only: star_of_approx_iff) (simp add: F_def E_def)
   have "exp (t *\<^sub>R - A) * exp (t *\<^sub>R A) = 1"
     using exp_add_commuting[of "- (t *\<^sub>R A)" "t *\<^sub>R A"] by simp
   then have "M t = M t * exp (t *\<^sub>R - A) * exp (t *\<^sub>R A)"
     by (simp add: mult.assoc)
   then show ?thesis
-    by (simp add: F1)
+    unfolding F1 by simp
 qed
 
 section \<open>The semigroup theorem\<close>
@@ -430,35 +435,35 @@ proof -
     using cont by (simp add: continuous_on_eq_continuous_within)
   then obtain \<delta> C where "\<delta> > 0" and bound:
     "\<And>n. norm ((1 / (\<delta> / real (Suc n))) *\<^sub>R (M (\<delta> / real (Suc n)) - 1)) \<le> C"
-    using exists_bounded_quotients[OF _ M0 add] by blast
+    using exists_bounded_quotients[of M, OF _ M0 add] by blast
   define Q where "Q = (\<lambda>h::real. (1 / h) *\<^sub>R (M h - 1))"
   define e where "e = (\<lambda>n. \<delta> / real (Suc n))"
 
-  txt \<open>The infinitesimal step \<open>\<epsilon> = \<delta> / \<omega>\<close>.\<close>
-  define \<epsilon> where "\<epsilon> = ( *f* e) whn"
+  txt \<open>The infinitesimal step \<open>\<eta> = \<delta> / \<omega>\<close>.\<close>
+  define \<eta> where "\<eta> = ( *f* e) whn"
   have "e \<longlonglongrightarrow> 0"
     using tendsto_mult_left_zero[OF LIMSEQ_inverse_real_of_nat, of \<delta>]
-    by (simp add: e_def divide_inverse)
-  then have "\<epsilon> \<approx> star_of 0"
-    unfolding \<epsilon>_def using LIMSEQ_NSLIMSEQ NSLIMSEQ_def HNatInfinite_whn by blast
-  then have eps_inf: "\<epsilon> \<in> Infinitesimal"
+    by (simp add: e_def divide_inverse mult.commute)
+  then have "\<eta> \<approx> star_of 0"
+    unfolding \<eta>_def using LIMSEQ_NSLIMSEQ NSLIMSEQ_def HNatInfinite_whn by blast
+  then have eps_inf: "\<eta> \<in> Infinitesimal"
     by (simp add: mem_infmal_iff)
   have "\<forall>N. 0 < ( *f* e) N"
     by transfer (simp add: e_def \<open>\<delta> > 0\<close>)
-  then have eps_pos: "0 < \<epsilon>"
-    by (simp add: \<epsilon>_def)
+  then have eps_pos: "0 < \<eta>"
+    by (simp add: \<eta>_def)
 
-  txt \<open>By transfer, \<open>(M \<epsilon> - 1) / \<epsilon>\<close> is finite, so it has a standard part.\<close>
+  txt \<open>By transfer, \<open>(M \<eta> - 1) / \<eta>\<close> is finite, so it has a standard part.\<close>
   have "\<forall>N. hnorm (( *f* Q) (( *f* e) N)) \<le> star_of C"
-    by transfer (simp add: Q_def e_def bound)
-  then have "hnorm (( *f* Q) \<epsilon>) < star_of (C + 1)"
-    unfolding \<epsilon>_def by (meson le_less_trans less_add_one star_of_less)
-  then have "( *f* Q) \<epsilon> \<in> HFinite"
-    unfolding HFinite_def by blast
-  then obtain A where "( *f* Q) \<epsilon> \<approx> star_of A"
+    by transfer (unfold Q_def e_def, intro allI bound)
+  then have "hnorm (( *f* Q) \<eta>) < star_of (C + 1)"
+    unfolding \<eta>_def by (meson le_less_trans less_add_one star_of_less)
+  then have "( *f* Q) \<eta> \<in> HFinite"
+    unfolding HFinite_def mem_Collect_eq by (rule bexI[OF _ SReal_hypreal_of_real])
+  then obtain A where "( *f* Q) \<eta> \<approx> star_of A"
     using HFinite_approx_star_of by blast
   then have "\<forall>t\<ge>0. M t = exp (t *\<^sub>R A)"
-    using euler_step[OF cont M0 add eps_inf eps_pos] unfolding Q_def by blast
+    using euler_step[of M, OF cont M0 add eps_inf eps_pos] unfolding Q_def by blast
   then show ?thesis ..
 qed
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Runs `lake` with the Lean toolchain and the Mathlib cache kept in `.tmp/`.
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+exec lake "$@"

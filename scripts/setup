@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# One-time setup: installs elan (Lean) and Isabelle into `.tmp/` and enables the git hooks.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+cd "$repo"
+mkdir -p "$tmp"
+if [ ! -x "$ELAN_HOME/bin/elan" ]; then
+  curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh |
+    sh -s -- -y --no-modify-path --default-toolchain none
+fi
+if [ ! -x "$isabelle_bin" ]; then
+  curl -fL --retry 3 \
+    "https://www.cl.cam.ac.uk/research/hvg/Isabelle/dist/${isabelle_version}_linux.tar.gz" |
+    tar xz -C "$tmp"
+fi
+git config core.hooksPath .githooks

@@ -8,25 +8,46 @@
 - `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step
   (finite differences, nonstandard analysis) and `NonstandardDraft.lean`, a draft whose 17
   interface lemmas are deliberately `sorry`. Built by default (`lakefile.toml`).
-- `Isabelle/`: work in progress, an Isabelle/HOL port of the nonstandard semigroup proof. See
-  [Isabelle/PLAN.md](Isabelle/PLAN.md) for its state and next steps.
+- `Isabelle/`: an Isabelle/HOL version of the nonstandard semigroup proof (session
+  `KernelRank_NSA`, theory `Semigroup_NSA.thy`), described in the README under "Alternative
+  proofs of the semigroup step".
+- `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
 - `README.md`: theorem statement, file table, commit history with Lean line counts, the
   alternative proofs, the purely nonstandard approach, and the suggested kernel-optimizer
   citation.
 
 ## Toolchain and commands
 
+- **Stay inside the repository.** Work from the repository root. All tools, caches, build
+  outputs and scratch files live under the ignored `.tmp/` directory, never elsewhere (such as
+  `/tmp` or `~`), so commands need no extra approval. `scripts/env.sh` sets this up:
+  `ELAN_HOME=.tmp/elan`, `XDG_CACHE_HOME` and `MATHLIB_CACHE_DIR` under `.tmp/cache`.
+  Always use the wrappers `scripts/lake` and `scripts/isabelle`, never bare `lake` or
+  `isabelle`.
+- `scripts/setup` (once): installs elan and Isabelle2026 into `.tmp/` and sets
+  `git config core.hooksPath .githooks`.
+- **Checks.** `scripts/check [--force] [lean] [isabelle]` is the single check used both during
+  work and by the pre-commit hook (`.githooks/pre-commit`, which adds `git diff --cached
+  --check` and `--staged`); there is no GitHub CI for the proofs. A passing component writes
+  `.tmp/checks/<component>.stamp`, keyed by a hash of the git blob ids of its inputs (sources,
+  build files, toolchain version, the scripts) as in the working tree. The hook requires the
+  inputs to have no unstaged or untracked changes and reruns only components whose key
+  changed. Run `scripts/check` after finishing work, so the commit is instant. Logs are in
+  `.tmp/checks/<component>.log`.
+  - `lean`: `lake exe cache get`, `lake build` (both libraries), no `sorry` outside
+    `Experiments/NonstandardDraft.lean`, and `#print axioms` on the main theorems
+    (`.tmp/checks/Axioms.lean`) must give only `propext`, `Classical.choice`, `Quot.sound`.
+    Add new key theorems to `lean_theorems` in `scripts/check`.
+  - `isabelle`: `isabelle build -d Isabelle KernelRank_NSA` (fails on `sorry`).
 - Lean `leanprover/lean4:v4.36.0-rc2`, Mathlib `v4.36.0-rc2`
   (commit `9d581dfff2e41de989072ea63abf3daf69311520`). Do not change dependencies unless asked.
-- `lake exe cache get` once, then `lake build` builds both libraries. A single module:
-  `lake build KernelRankLean.ComplexRank`. A scratch file: `lake env lean path/to/File.lean`.
-- Each module takes roughly 45–60 s, almost all of it loading `import Mathlib`.
-- Audit axioms with a scratch file that imports `KernelRankLean` (and `Experiments`) and runs
-  `#print axioms` on the key theorems, e.g. `separableRank_radial_eq_iff`,
-  `separableRank_radial_lt_top_iff_exists`, `exists_minimal_differential_annihilator`,
-  `separableRank_sum_expPoly`, `exists_translation_generator`. Keep scratch files outside the
-  repository or delete them.
-- `git diff --check` before committing.
+- A single Lean module: `scripts/lake build KernelRankLean.ComplexRank`. A scratch file:
+  `scripts/lake env lean .tmp/Scratch.lean`. A full rebuild of the repository's modules takes
+  about 40 s on 18 cores; each module alone is 45–60 s, mostly loading `import Mathlib`.
+- Isabelle: after a failed build, `scripts/isabelle build_log -H Error KernelRank_NSA` lists
+  all errors. Add `-v` to `build` to see which command is slow (reported after 20 s); a
+  `-o timeout=100` keeps a looping `blast`/`auto`/`intro` from hanging the build. The first
+  build also builds the `HOL-Analysis` heap (9 minutes with `-j 4`); afterwards about 10 s.
 
 ## Conventions and the user's preferences
 
@@ -45,6 +66,7 @@
 - Commits end with the trailer
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`. Commit only when
   asked; do not push unless asked.
+- Keep this file current: update it whenever you learn something useful for later agents.
 - Lean/Mathlib search resources: <https://leansearch.net/> (POST `/search`),
   <https://loogle.lean-lang.org/json?q=...> (separate constraints with commas), and a local
   copy of the Lean Zulip archive, `lean-zulip-archive` (ask the user for its location).
@@ -89,3 +111,15 @@
 - Mathlib's `Hyperreal` is `Germ (hyperfilter ℕ) ℝ`; there is no transfer principle. Standard
   parts exist via `ArchimedeanClass.stdPart`; for vectors use convergence along the
   ultrafilter (`IsCompact.ultrafilter_le_nhds`).
+
+## Isabelle gotchas met so far
+
+- `transfer` fails on goals that mention a fixed hyperreal such as `η`: prove the statement
+  for all `h` by transfer, then instantiate.
+- `\<epsilon>` is a constant in `HOL-Analysis`; do not use it as a bound or defined name.
+- `HOL-Analysis` declares `\<approx>` as infix `eqpoll`; add
+  `no_notation eqpoll (infixl \<open>\<approx>\<close> 50)` to avoid ambiguous parses with `approx`.
+- "Unification bound exceeded" warnings: instantiate the function before `OF`, as in
+  `semigroup_pow[of M h k, OF M0 add]`.
+- `(intro Infinitesimal_interval2 ...)` and `blast` on `bounded_iff` can loop; apply the
+  rule once with explicit `OF`, or `obtain` the witness explicitly.

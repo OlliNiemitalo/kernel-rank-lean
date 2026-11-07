@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Runs `isabelle` from `.tmp/`, with its per-user state (heaps, build databases, logs) kept in
+# `.tmp/isabelle-home` instead of `~/.isabelle`.
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+export USER_HOME="$tmp/isabelle-home"
+mkdir -p "$USER_HOME"
+exec "$isabelle_bin" "$@"
