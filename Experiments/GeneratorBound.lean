@@ -7,7 +7,7 @@ Let `M` be a semigroup in a normed algebra, `M (s + t) = M s * M t` with `M 0 = 
 at `0` from the right. If `‖M s - 1‖ ≤ 1/2` on `[0, δ]` and `h = δ / n`, then the average
 `q = (1 + x + ⋯ + x ^ (n - 1)) / n` of the powers of `x = M h` is within `1/2` of `1`, and
 `n (x - 1) q = x ^ n - 1 = M δ - 1`. Hence the difference quotients `(M h - 1) / h` along
-`h = δ / (n + 1)` are bounded. Both proofs of the semigroup theorem in this folder start here.
+`h = δ / (n + 1)` are bounded. The finite-difference proof of the semigroup theorem starts here.
 -/
 
 open Filter Set

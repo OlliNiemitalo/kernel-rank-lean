@@ -6,11 +6,12 @@
   circularly symmetric kernels (`KernelRank.separableRank_radial_eq_iff` in `Main.lean`). It
   must stay free of `sorry`; its axioms are only `propext`, `Classical.choice`, `Quot.sound`.
 - `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step
-  (finite differences, nonstandard analysis) and `NonstandardDraft.lean`, a draft whose 17
+  (finite differences, nonstandard analysis) and `NonstandardDraft.lean`, a draft whose 16
   interface lemmas are deliberately `sorry`. Built by default (`lakefile.toml`).
 - `Isabelle/`: an Isabelle/HOL version of the nonstandard semigroup proof (session
   `KernelRank_NSA`, theory `Semigroup_NSA.thy`), described in the README under "Alternative
-  proofs of the semigroup step".
+  proofs of the semigroup step". It, `Experiments/NonstandardSemigroup.lean` and the draft
+  follow the same argument (see "Mathematics of the nonstandard proofs" below).
 - `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
 - `README.md`: theorem statement, file table, commit history with Lean line counts, the
   alternative proofs, the purely nonstandard approach, and the suggested kernel-optimizer
@@ -101,6 +102,27 @@
   generator, giving the lower bound. Hasse-derivative independence is still used.
 - Real sufficiency expands nonreal components into conjugate pairs (`Sufficiency`).
 
+## Mathematics of the nonstandard proofs
+
+- With `x = M ε - 1` and the common scale `η = ε + ‖x‖`, the bounded vector `x / η` has a
+  standard part `B` (finite dimensions), and `ε / η ≈ a = 1 - ‖B‖`. Euler's step gives
+  `M (s a) = exp (s B)`; `a = 0` would force `B = 0`, so `A = B / a`. There is no bound on
+  `x / ε`; `Experiments/GeneratorBound.lean` now serves only the finite-difference proof.
+- Euler's step is for two arbitrary continuous semigroups with step sizes `δ ≤ η`: take `N`
+  steps with `N η ≤ s < (N + 1) η` and replace the steps of `M` by those of `E` one at a time
+  (an induction with a remaining time `r` of `E`). Names: `replace_steps`, `euler_step`,
+  `semigroup_eq_exp` in Isabelle; `norm_replace_steps_le`, `eq_of_infinitesimal_steps`,
+  `exists_eq_exp_of_semigroup_nonstandard` in Lean.
+- Isabelle: `η` and `x / η` are defined as ordinary functions of the step `h` and evaluated
+  at `ε` with `*f*`, so each ordinary identity about them is one `transfer`. This avoids
+  `scaleHR`. `euler_step` takes a hypernatural `N` (transferred `floor_step`) and transfers
+  `replace_steps` as it stands.
+- Isabelle: `approx_continuous_on` is nonstandard continuity on a set (the library has only
+  `isNSCont`, for `UNIV`); `starset_atLeast` turns `x ∈ *s* {a..}` into `star_of a ≤ x`;
+  `standard_part` (Heine–Borel) also returns the norm bound.
+- Lean draft: one-variable transfer only, so the step count and both times are functions of
+  the step `h` (`T`, `K`), evaluated at `ε` or at `ext η ε`; Euler's step is inline.
+
 ## Lean gotchas met so far
 
 - Translate space norm: `TranslationSemigroup` installs `translateNormedAddCommGroup`,
@@ -126,7 +148,12 @@
   `Tendsto.comp`.
 - Mathlib's `Hyperreal` is `Germ (hyperfilter ℕ) ℝ`; there is no transfer principle. Standard
   parts exist via `ArchimedeanClass.stdPart`; for vectors use convergence along the
-  ultrafilter (`IsCompact.ultrafilter_le_nhds`).
+  ultrafilter (`IsCompact.ultrafilter_le_nhds`; ascribe its conclusion as
+  `Tendsto q (hyperfilter ℕ) (𝓝 B)` in the `obtain` pattern to use `.sub`, `.norm`).
+- In `NonstandardDraft.lean`, `ε` is `let ε := ext e ω`, so a bare `rw [ext_comp]` may rewrite
+  `ext f ε` itself: give `ext_comp` its arguments. A goal `x ∈ Ici 0` is not closed by
+  `le_of_lt hx`; use `mem_Ici.mpr`. `by positivity` inside a `transfer_mem` lambda needs the
+  binder and numeral types written out.
 
 ## Isabelle gotchas met so far
 
@@ -138,4 +165,16 @@
 - "Unification bound exceeded" warnings: instantiate the function before `OF`, as in
   `semigroup_pow[of M h k, OF M0 add]`.
 - `(intro Infinitesimal_interval2 ...)` and `blast` on `bounded_iff` can loop; apply the
-  rule once with explicit `OF`, or `obtain` the witness explicitly.
+  rule once with explicit `OF`, or `obtain` the witness explicitly. `auto simp: bounded_iff`
+  is fine. A `metis` with many `HFinite`/`approx` lemmas can run for minutes: give the scratch
+  session `options [timeout = 100]` and split the step.
+- `transfer` turns `real n` for a bound `n :: nat` into `of_hypnat n` and `S` into `*s* S`, so
+  a lemma can be transferred as it stands and applied to a hypernatural number of steps.
+- Inside the proof of an `obtain`, `that` is the obtained rule, not the enclosing `if` fact;
+  cite the enclosing fact literally, as `\<open>0 < r\<close>`.
+- `HFinite_hnorm_iff` is stated for hyperreals only. For a vector, unfold `HFinite_def`, or
+  avoid `HFinite` by a bound `hnorm x \<le> star_of r` as in `standard_part`.
+- `simp` rewrites facts such as `0 \<le> real n * k` to `True` and then cannot use them for
+  linear arithmetic: `unfolding of_nat_Suc distrib_right by linarith+` keeps them.
+- `intro rule[OF ... fact]` with a conditional `fact` leaves its trivial premises as extra
+  subgoals: finish with `simp_all`, not `simp`.

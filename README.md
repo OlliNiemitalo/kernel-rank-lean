@@ -134,14 +134,16 @@ of the profile is such a semigroup, so this step produces the generator `A`.
 [Semigroup.lean](KernelRankLean/Semigroup.lean) proves it by smoothing with an integral. It
 works in any Banach algebra.
 
-The alternatives below work in finite-dimensional algebras. They start from the same bound: if
-`M` stays within `1/2` of `1` on `[0, δ]`, geometric sums bound the difference quotients
-`(M h - 1) / h` for `h = δ / n`. The Lean versions share this bound,
-[GeneratorBound.lean](Experiments/GeneratorBound.lean), and
-[Translation.lean](Experiments/Translation.lean) applies them to the translation semigroup.
+The alternatives below work in finite-dimensional algebras. They obtain the generator `A` from
+the difference quotients `(M h - 1) / h` for small `h`, so these quotients must stay bounded.
+The finite-difference proof proves that first. The nonstandard proofs need no such bound.
+[Translation.lean](Experiments/Translation.lean) applies both Lean proofs to the translation
+semigroup.
 
 ### Finite differences
 
+[GeneratorBound.lean](Experiments/GeneratorBound.lean): if `M` stays within `1/2` of `1` on
+`[0, δ]`, geometric sums bound the difference quotients for `h = δ / n`.
 [FiniteDifferenceSemigroup.lean](Experiments/FiniteDifferenceSemigroup.lean): in finite
 dimensions, a subsequence of the bounded quotients converges to some `A`. Along it, the
 difference quotients of `M t * exp (-t A)` tend to `0` at every point. A mean-value theorem for
@@ -149,31 +151,49 @@ one-sided difference quotients then shows that this product is constant.
 
 ### Nonstandard analysis, after Euler
 
-Fix a positive infinitesimal step `ε`. The quotient `(M ε - 1) / ε` is finite, so it has a
-standard part `A`. Each step multiplies `M t * exp (-t A)` by a factor that differs from `1` by
-`ε` times an infinitesimal. Over `⌊t / ε⌋` steps these changes add up to an infinitesimal, so
-the product stays `1`. The argument has three formalizations:
+Fix a positive infinitesimal step `ε`. In the time `ε` the semigroup changes by `x = M ε - 1`.
+If the quotient `x / ε` is finite, it has a standard part `A`. One step of `M` then differs from
+one step of `exp (t A)` by `ε` times an infinitesimal. Over `⌊t / ε⌋` steps these differences
+add up to an infinitesimal, so `M t = exp (t A)`. This is Euler's step.
 
+The proof does not bound `x / ε` beforehand: Euler's step itself shows that it is finite.
+Measure the time and the change on the common scale `η = ε + ‖x‖`. As
+`ε / η + ‖x / η‖ = 1`, both are finite without any estimate: `x / η` has a standard part `B`,
+and `ε / η` is infinitely close to `a = 1 - ‖B‖`. The pair `(a, B)` is the generator in
+homogeneous coordinates: `A = B / a`, once `a ≠ 0` is known. Euler's step is proved for two
+arbitrary continuous semigroups: if `M` takes steps of size `δ` while `E` takes steps of size
+`η`, with `δ / η` infinitely close to `a`, and the steps `M δ` and `E η` differ by `η` times an
+infinitesimal, then `M (s a) = E s`. For `E s = exp (s B)` this gives `M (s a) = exp (s B)`.
+Now `a = 0` would mean `exp (s B) = M 0 = 1` for all `s ≥ 0`, so `B = 0` and `a = 1`. Hence
+`a ≠ 0`, and `M t = exp (t B / a)`.
+
+The only ordinary estimate is the cost of replacing `n` steps of one semigroup by `n` steps of
+another, one at a time. The argument has three formalizations:
+
+* **Isabelle/HOL** ([Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy)). Isabelle's
+  `HOL-Nonstandard_Analysis` library provides hyperreals, hypernatural numbers and nonstandard
+  vectors as an ultrapower, a `transfer` method, infinite closeness `≈`, standard parts of
+  finite hyperreals, and nonstandard characterizations of limits. Euler's step (`euler_step`)
+  takes a hypernatural number `N` of steps, with `N η ≤ s < (N + 1) η`, and transfers the
+  ordinary estimate as it stands. The proof adds two general facts that the library lacks:
+  standard parts of bounded vectors in finite-dimensional (Heine–Borel) spaces, and continuity
+  on a set, here `[0, ∞)`, at infinitesimal scale.
 * **Lean** ([NonstandardSemigroup.lean](Experiments/NonstandardSemigroup.lean)). Mathlib has
   hyperreals, as sequences along an ultrafilter, but no transfer principle, so the proof works
-  with those sequences directly. The ultrafilter makes the standard part exist without
-  extracting a subsequence.
-* **Isabelle/HOL** ([Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy)). Isabelle's
-  `HOL-Nonstandard_Analysis` library provides hyperreals and nonstandard vectors as an
-  ultrapower, a `transfer` method, infinite closeness `≈`, standard parts of finite hyperreals,
-  and nonstandard characterizations of limits and continuity. Transfer turns the ordinary
-  bounds into statements about the infinitesimal step directly. The proof adds standard parts
-  of finite vectors in finite-dimensional (Heine–Borel) spaces, which the library lacks.
+  with those sequences directly. Euler's step (`eq_of_infinitesimal_steps`) is a statement
+  about limits along an arbitrary filter. The ultrafilter makes the standard part `B` exist
+  without extracting a subsequence.
 * **Lean draft** ([NonstandardDraft.lean](Experiments/NonstandardDraft.lean)). The same proof
   written the way a nonstandard analyst would, against a small hand-made interface: the
   ultrapower `Hyp α` along `hyperfilter ℕ`, natural extensions `ext f`, internal membership,
-  and `x ≈ₕ y` for "infinitely close". 17 interface lemmas are left as `sorry`: one-variable
+  and `x ≈ₕ y` for "infinitely close". 16 interface lemmas are left as `sorry`: one-variable
   transfer, arithmetic of `≈ₕ`, standard parts in finite dimensions, continuity and
   derivatives at infinitesimal scale, and `1 / ω ≈ 0`. These are the facts a nonstandard
   analysis library would provide, and most would be short proofs about limits along the
-  ultrafilter. The proof of the semigroup theorem itself (91 lines) has no `sorry`. Being a
-  draft, it is built by `lake build` but its theorem depends on `sorryAx`; the main theorem
-  does not.
+  ultrafilter. The proof of the semigroup theorem itself (143 lines) has no `sorry`. It is
+  longer than the Lean proof above because, with one-variable transfer only, every quantity
+  is an ordinary function of the step, evaluated at `ε`. Being a draft, it is built by
+  `lake build` but its theorem depends on `sorryAx`; the main theorem does not.
 
 ### Comparison
 
@@ -184,23 +204,24 @@ the main proof keeps it:
 |---|---|---:|---:|
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
-| Nonstandard analysis, Lean | `GeneratorBound.lean` + `NonstandardSemigroup.lean` | 289 | 263 |
-| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 302 | 283 |
+| Nonstandard analysis, Lean | `NonstandardSemigroup.lean` | 206 | 190 |
+| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 310 | 283 |
 
-The shared bound, `GeneratorBound.lean`, is 124 lines (112 nonblank) of each Lean alternative.
-The two nonstandard proofs split as follows (physical / nonblank lines):
+The bound on the difference quotients, `GeneratorBound.lean`, is 124 lines (112 nonblank) of
+the finite-difference proof. The two nonstandard proofs split as follows (physical / nonblank
+lines):
 
 | Part | Lean | Isabelle/HOL |
 |---|---:|---:|
-| Headers, imports and overview | 55 / 39 | 23 / 19 |
-| Ordinary analysis: bounded quotients, telescoping over `⌊t / h⌋` steps | 144 / 137 | 130 / 124 |
-| Nonstandard part: standard parts, Euler's step, the theorem | 90 / 87 | 149 / 140 |
-| Total | 289 / 263 | 302 / 283 |
+| Headers, imports and overview | 45 / 33 | 29 / 24 |
+| Ordinary analysis: replacing the steps of one semigroup by those of another | 35 / 34 | 54 / 50 |
+| Nonstandard part: Euler's step, the theorem; in Isabelle also standard parts and continuity | 126 / 123 | 227 / 209 |
+| Total | 206 / 190 | 310 / 283 |
 
-In Isabelle the ordinary analysis is shorter, helped by library lemmas on floors and
-geometric sums, but the nonstandard part is longer, mostly because it proves that finite
-vectors have standard parts (39 lines); the Lean proof gets them from convergence along the
-ultrafilter in Mathlib.
+Euler's step takes 58 lines in Lean and 79 in Isabelle, and the theorem 68 and 81. The rest of
+the difference is general facts that Mathlib provides in the language of filters and the
+Isabelle proof has to add: standard parts of bounded vectors (37 lines) and continuity on a set
+at infinitesimal scale (26 lines).
 
 ## A purely nonstandard approach
 
@@ -220,7 +241,7 @@ points, by continuity, so `rank H ≥ r`.
 **The proof.** A sequence whose Hankel matrix has finite rank satisfies a linear recurrence:
 `aₖ = β Sᵏ v` for a square matrix `S` (Kronecker's theorem). `S` advances the grid by one
 infinitesimal step, so it is close to the identity; write `S = 1 + εQ`. In a suitable basis,
-continuity and a geometric-sum bound make `Q` finite, so it has a standard part `A`. For
+continuity makes `Q` finite, so it has a standard part `A`. For
 standard `t`, after `n = ⌊t / ε⌋` steps, `φ(t) ≈ β Sⁿ v ≈ β exp (t A) v`, as in Euler's
 derivation of the exponential function; this is the semigroup argument above. Generalized
 eigenvectors of `A` then give exponential polynomials, and the exact rank is algebra.
