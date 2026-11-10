@@ -1,5 +1,6 @@
 import Experiments.GeneratorBound
 import Experiments.FiniteDifferenceSemigroup
 import Experiments.NonstandardSemigroup
-import Experiments.NonstandardDraft
+import Experiments.Ultrapower
+import Experiments.UltrapowerSemigroup
 import Experiments.Translation

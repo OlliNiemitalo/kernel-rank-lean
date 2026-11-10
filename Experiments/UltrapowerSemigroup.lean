@@ -1,22 +1,18 @@
 import Experiments.NonstandardSemigroup
+import Experiments.Ultrapower
 
 /-!
-# Draft: the semigroup theorem in nonstandard language
+# The semigroup theorem in nonstandard language
 
-This draft proves `M t = exp (t A)` the way a nonstandard analyst would write it, using a small
-interface for nonstandard analysis. **Every `sorry` in this file is in that interface**, the
-`Infrastructure` section below. Those are the general facts a Mathlib library for nonstandard
-analysis would provide; nothing in them is specific to semigroups. The proof of
-`exists_eq_exp_of_semigroup` itself has no `sorry`.
+This file proves `M t = exp (t A)` the way a nonstandard analyst would write it, with the
+vocabulary of `Ultrapower.lean`: an infinitesimal step `ε`, natural extensions `ext f`, infinite
+closeness `≈ₕ`, standard parts and transfer. The argument is that of
+`NonstandardSemigroup.lean`, whose header explains it; that file works with sequences along
+the ultrafilter instead. The only ordinary estimate, `norm_replace_steps_le`, is shared.
 
-The interface models hyperreals as Mathlib does: `Hyp α` is the ultrapower of `α` along
-`hyperfilter ℕ`, the natural extension `*f` of `f` is `ext f`, and `x ≈ₕ y` means that `x - y`
-is infinitesimal. Mathlib has no transfer principle; the draft needs only one-variable instances
-of it (`transfer_mem`, `transfer_le`, `transfer_eq`). For that reason the scale `η` and all
-other quantities are ordinary functions of the step `h`, evaluated at the infinitesimal `ε`.
-
-For a proof of the same theorem with no `sorry`, see `NonstandardSemigroup.lean`, which works
-with sequences along the ultrafilter instead. Its header explains the argument.
+The interface has only one-variable instances of the transfer principle. For that reason the
+scale `η`, the number of steps and all other quantities are ordinary functions of the step `h`,
+evaluated at the infinitesimal `ε`.
 -/
 
 open Filter NormedSpace Set
@@ -25,119 +21,6 @@ open scoped Topology
 noncomputable section
 
 namespace Experiments.NSA
-
-/-! ## Infrastructure -/
-
-/-- The ultrapower `*α` of `α`: germs of sequences along `hyperfilter ℕ`. -/
-abbrev Hyp (α : Type*) : Type _ := Germ (hyperfilter ℕ : Filter ℕ) α
-
-/-- The standard copy of `x` in `*α`. -/
-abbrev std {α : Type*} (x : α) : Hyp α := Germ.const x
-
-/-- The natural extension `*f` of `f`. -/
-abbrev ext {α β : Type*} (f : α → β) (ξ : Hyp α) : Hyp β := Germ.map f ξ
-
-/-- An unlimited hypernatural number. -/
-def ω : Hyp ℕ := Germ.ofFun id
-
-/-- Internal membership `ξ ∈ *s`. -/
-def IMem {α : Type*} (ξ : Hyp α) (s : Set α) : Prop := ξ.LiftPred (· ∈ s)
-
-/-- `x` and `y` are infinitely close. -/
-def Approx {E : Type*} [SeminormedAddCommGroup E] (x y : Hyp E) : Prop :=
-  (x - y).Tendsto (𝓝 0)
-
-@[inherit_doc] scoped infix:50 " ≈ₕ " => Approx
-
-section Extension
-
-variable {α β γ : Type*}
-
-lemma ext_comp (f : β → γ) (g : α → β) (ξ : Hyp α) :
-    ext f (ext g ξ) = ext (fun x => f (g x)) ξ :=
-  Germ.map_map f g ξ
-
-lemma ext_const (ξ : Hyp α) (c : β) : ext (fun _ => c) ξ = std c :=
-  Germ.inductionOn ξ fun _ => rfl
-
-lemma ext_id (ξ : Hyp α) : ext (fun x => x) ξ = ξ :=
-  Germ.inductionOn ξ fun _ => rfl
-
-lemma ext_sub [Sub β] (f g : α → β) (ξ : Hyp α) :
-    ext (fun x => f x - g x) ξ = ext f ξ - ext g ξ :=
-  Germ.inductionOn ξ fun _ => rfl
-
-lemma ext_mul [Mul β] (f g : α → β) (ξ : Hyp α) :
-    ext (fun x => f x * g x) ξ = ext f ξ * ext g ξ :=
-  Germ.inductionOn ξ fun _ => rfl
-
-lemma imem_univ (ξ : Hyp α) : IMem ξ univ :=
-  Germ.inductionOn ξ fun _ => Germ.liftPred_coe.mpr (Eventually.of_forall fun _ => trivial)
-
-/-- Transfer: `∀ x ∈ s, f x ∈ t` gives `∀ ξ ∈ *s, *f ξ ∈ *t`. -/
-lemma transfer_mem {f : α → β} {s : Set α} {t : Set β} (h : ∀ x ∈ s, f x ∈ t) {ξ : Hyp α}
-    (hξ : IMem ξ s) : IMem (ext f ξ) t := sorry
-
-/-- Transfer: `∀ x ∈ s, f x ≤ g x` gives `∀ ξ ∈ *s, *f ξ ≤ *g ξ`. -/
-lemma transfer_le {f g : α → ℝ} {s : Set α} (h : ∀ x ∈ s, f x ≤ g x) {ξ : Hyp α}
-    (hξ : IMem ξ s) : ext f ξ ≤ ext g ξ := sorry
-
-/-- Transfer: `∀ x ∈ s, f x = g x` gives `∀ ξ ∈ *s, *f ξ = *g ξ`. -/
-lemma transfer_eq {f g : α → β} {s : Set α} (h : ∀ x ∈ s, f x = g x) {ξ : Hyp α}
-    (hξ : IMem ξ s) : ext f ξ = ext g ξ := sorry
-
-end Extension
-
-section Approx
-
-variable {E F : Type*} [NormedAddCommGroup E] [NormedAddCommGroup F]
-
-lemma approx_refl (x : Hyp E) : x ≈ₕ x := sorry
-
-lemma Approx.symm {x y : Hyp E} (h : x ≈ₕ y) : y ≈ₕ x := sorry
-
-lemma Approx.trans {x y z : Hyp E} (hxy : x ≈ₕ y) (hyz : y ≈ₕ z) : x ≈ₕ z := sorry
-
-lemma approx_iff_sub {x y : Hyp E} : x ≈ₕ y ↔ x - y ≈ₕ std 0 := sorry
-
-lemma Approx.sub_std {x y : Hyp E} {a b : E} (hx : x ≈ₕ std a) (hy : y ≈ₕ std b) :
-    x - y ≈ₕ std (a - b) := sorry
-
-lemma Approx.mul_std {R : Type*} [NormedRing R] {x y : Hyp R} {a b : R}
-    (hx : x ≈ₕ std a) (hy : y ≈ₕ std b) : x * y ≈ₕ std (a * b) := sorry
-
-/-- Standard points that are infinitely close are equal. -/
-lemma eq_of_std_approx {a b : E} (h : std a ≈ₕ std b) : a = b := sorry
-
-/-- A finite multiple of an infinitesimal is infinitesimal. -/
-lemma approx_zero_of_norm_le {x : Hyp E} {y : Hyp F} {k : Hyp ℝ} {c : ℝ} (hk : k ≈ₕ std c)
-    (hxy : ext norm x ≤ k * ext norm y) (hy : y ≈ₕ std 0) : x ≈ₕ std 0 := sorry
-
-/-- Squeeze: a hyperreal between two that are infinitely close to `t` is too. -/
-lemma approx_of_le_of_le {lo ξ hi : Hyp ℝ} {t : ℝ} (hlo : lo ≤ ξ) (hhi : ξ ≤ hi)
-    (hlot : lo ≈ₕ std t) (hhit : hi ≈ₕ std t) : ξ ≈ₕ std t := sorry
-
-/-- In a proper space, a bounded element has a standard part, with the same bound. -/
-lemma exists_std [ProperSpace E] {x : Hyp E} {C : ℝ} (hx : ext norm x ≤ std C) :
-    ∃ a, ‖a‖ ≤ C ∧ x ≈ₕ std a := sorry
-
-/-- Continuity: points of `*s` infinitely close to `x` map to points infinitely close to
-`f x`. -/
-lemma approx_ext_of_continuousWithinAt {f : F → E} {s : Set F} {x : F}
-    (hf : ContinuousWithinAt f s x) {ξ : Hyp F} (hξs : IMem ξ s) (hξ : ξ ≈ₕ std x) :
-    ext f ξ ≈ₕ std (f x) := sorry
-
-/-- Derivative: difference quotients over positive infinitesimals are infinitely close to it. -/
-lemma approx_slope_of_hasDerivAt [NormedSpace ℝ E] {f : ℝ → E} {f' : E} {x : ℝ}
-    (hf : HasDerivAt f f' x) {ε : Hyp ℝ} (hpos : IMem ε (Ioi 0)) (hε : ε ≈ₕ std 0) :
-    ext (fun h => h⁻¹ • (f (x + h) - f x)) ε ≈ₕ std f' := sorry
-
-/-- `c / (ω + 1)` is infinitesimal. -/
-lemma approx_div_omega (c : ℝ) : ext (fun n : ℕ => c / (n + 1 : ℝ)) ω ≈ₕ std 0 := sorry
-
-end Approx
-
-/-! ## The semigroup theorem -/
 
 variable {A : Type*} [NormedRing A] [NormedAlgebra ℝ A] [CompleteSpace A]
 
@@ -158,12 +41,10 @@ theorem exists_eq_exp_of_semigroup [FiniteDimensional ℝ A] (M : ℝ → A)
   have hηh : ∀ h, 0 < h → 0 < η h := fun h hh => add_pos_of_pos_of_nonneg hh (norm_nonneg _)
   have hηpos : IMem (ext η ε) (Ioi 0) := transfer_mem (f := η) hηh hεpos
   have hη : ext η ε ≈ₕ std 0 := by
-    have hc : ContinuousWithinAt η (Ici 0) 0 :=
-      continuousWithinAt_id.add ((hcont 0 (by simp)).sub continuousWithinAt_const).norm
-    have hmem : IMem ε (Ici 0) := by
-      simpa only [ext_id] using
-        transfer_mem (f := fun x => x) (fun x hx => mem_Ici.mpr (mem_Ioi.mp hx).le) hεpos
-    have h := approx_ext_of_continuousWithinAt hc hmem hε
+    have hc : ContinuousWithinAt η (Ioi 0) 0 :=
+      (continuousWithinAt_id.add ((hcont 0 (by simp)).sub continuousWithinAt_const).norm).mono
+        Ioi_subset_Ici_self
+    have h := approx_ext_of_continuousWithinAt hc hεpos hε
     rwa [show η 0 = 0 by simp [η, h0]] at h
   -- On that scale the change `q` is finite, so it has a standard part `B`, and the time is
   -- infinitely close to `a = 1 - ‖B‖`.

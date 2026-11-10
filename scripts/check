@@ -27,6 +27,7 @@ lean_theorems=(
   KernelRank.exists_translation_generator
   Experiments.exists_eq_exp_of_semigroup_finiteDifference
   Experiments.exists_eq_exp_of_semigroup_nonstandard
+  Experiments.NSA.exists_eq_exp_of_semigroup
   Experiments.exists_translation_generator_finiteDifference
   Experiments.exists_translation_generator_nonstandard
 )
@@ -96,10 +97,10 @@ check_lean() {
     echo "lean: lake build failed (full log: $log)" >&2
     return 1
   fi
-  bad="$(grep -E 'declaration uses .sorry.' "$log" | grep -v 'Experiments/NonstandardDraft.lean' || true)"
+  bad="$(grep -E 'declaration uses .sorry.' "$log" || true)"
   if [ -n "$bad" ]; then
     echo "$bad" >&2
-    echo "lean: sorry outside the draft Experiments/NonstandardDraft.lean" >&2
+    echo "lean: sorry is not allowed" >&2
     return 1
   fi
   {

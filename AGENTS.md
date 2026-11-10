@@ -5,17 +5,20 @@
 - `KernelRankLean/` and `KernelRankLean.lean`: the proof of the separable-rank theorem for
   circularly symmetric kernels (`KernelRank.separableRank_radial_eq_iff` in `Main.lean`). It
   must stay free of `sorry`; its axioms are only `propext`, `Classical.choice`, `Quot.sound`.
-- `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step
-  (finite differences, nonstandard analysis) and `NonstandardDraft.lean`, a draft whose 16
-  interface lemmas are deliberately `sorry`. Built by default (`lakefile.toml`).
+- `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step, none used
+  by the main proof and all free of `sorry`: finite differences (`GeneratorBound.lean`,
+  `FiniteDifferenceSemigroup.lean`), nonstandard analysis with sequences
+  (`NonstandardSemigroup.lean`), and nonstandard analysis in nonstandard language
+  (`Ultrapower.lean`, a general interface, and `UltrapowerSemigroup.lean`). Built by default
+  (`lakefile.toml`). `Experiments/README.md` describes and compares them, with line counts;
+  update it when any of them, or the Isabelle theory, changes.
 - `Isabelle/`: an Isabelle/HOL version of the nonstandard semigroup proof (session
-  `KernelRank_NSA`, theory `Semigroup_NSA.thy`), described in the README under "Alternative
-  proofs of the semigroup step". It, `Experiments/NonstandardSemigroup.lean` and the draft
-  share the same normalization (see "Mathematics of the nonstandard proofs" below).
+  `KernelRank_NSA`, theory `Semigroup_NSA.thy`), also described in `Experiments/README.md`.
+  All nonstandard proofs share the same normalization (see "Mathematics of the nonstandard
+  proofs" below).
 - `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
-- `README.md`: theorem statement, file table, commit history with Lean line counts, the
-  alternative proofs, the purely nonstandard approach, and the suggested kernel-optimizer
-  citation.
+- `README.md`: theorem statement, file table, commit history with Lean line counts, a summary
+  of the alternative proofs, and the suggested kernel-optimizer citation.
 
 ## Toolchain and commands
 
@@ -46,8 +49,8 @@
   inputs to have no unstaged or untracked changes and reruns only components whose key
   changed. Run `scripts/check` after finishing work, so the commit is instant. Logs are in
   `.tmp/checks/<component>.log`.
-  - `lean`: `lake exe cache get`, `lake build` (both libraries), no `sorry` outside
-    `Experiments/NonstandardDraft.lean`, and `#print axioms` on the main theorems
+  - `lean`: `lake exe cache get`, `lake build` (both libraries), no `sorry` in any Lean
+    file, and `#print axioms` on the main theorems and the alternative proofs
     (`.tmp/checks/Axioms.lean`) must give only `propext`, `Classical.choice`, `Quot.sound`.
     Add new key theorems to `lean_theorems` in `scripts/check`.
   - `isabelle`: builds `KernelRank_NSA`, then a generated session
@@ -125,8 +128,19 @@
   `approx_continuous_on` and `starset_atLeast` helpers are no longer used.
 - Isabelle: `approx_continuous_halfline` extends `f` by `f (max t 0)` to reuse `isNSCont`.
   `standard_part` (Heine–Borel) also returns the norm bound.
-- Lean draft: one-variable transfer only, so the step count and both times are functions of
-  the step `h` (`T`, `K`), evaluated at `ε` or at `ext η ε`; Euler's step is inline.
+- Lean in nonstandard language: `Ultrapower.lean` has `Hyp`, `std`, `ext`, `IMem`, `≈ₕ` and
+  one-variable transfer. Its proofs go through `Germ.inductionOn` (also `₂`, `₃`) with
+  `induction x using ...`, then `approx_std_coe`: the germ of `u` is `≈ₕ std a` iff `u` tends
+  to `a` along the ultrafilter. Most Germ facts (`coe_le`, `liftPred_coe`, `coe_tendsto`) are
+  `Iff.rfl`. In `UltrapowerSemigroup.lean` the step count and both times are functions of the
+  step `h` (`T`, `K`), evaluated at `ε` or at `ext η ε`; Euler's step is inline and uses
+  `norm_replace_steps_le` from `NonstandardSemigroup.lean`.
+- Conclusions so far (details in `Experiments/README.md`): no nonstandard version is shorter
+  than the 96-line integral proof, and all need finite dimension. In Lean the nonstandard
+  vocabulary saves nothing over filters, since the interface only restates limits along the
+  ultrafilter. Porting Isabelle's power estimate to Lean needs `‖1‖ = 1`, which Mathlib gives
+  operator algebras only on a nontrivial space; the translate space is trivial for the zero
+  profile.
 
 ## Lean gotchas met so far
 
@@ -155,7 +169,7 @@
   parts exist via `ArchimedeanClass.stdPart`; for vectors use convergence along the
   ultrafilter (`IsCompact.ultrafilter_le_nhds`; ascribe its conclusion as
   `Tendsto q (hyperfilter ℕ) (𝓝 B)` in the `obtain` pattern to use `.sub`, `.norm`).
-- In `NonstandardDraft.lean`, `ε` is `let ε := ext e ω`, so a bare `rw [ext_comp]` may rewrite
+- In `UltrapowerSemigroup.lean`, `ε` is `let ε := ext e ω`, so a bare `rw [ext_comp]` may rewrite
   `ext f ε` itself: give `ext_comp` its arguments. A goal `x ∈ Ici 0` is not closed by
   `le_of_lt hx`; use `mem_Ici.mpr`. `by positivity` inside a `transfer_mem` lambda needs the
   binder and numeral types written out.

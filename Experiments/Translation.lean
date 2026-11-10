@@ -3,11 +3,13 @@ import Experiments.NonstandardSemigroup
 import KernelRankLean.TranslationSemigroup
 
 /-!
-# Both alternative proofs apply to the translation semigroup
+# The alternative proofs apply to the translation semigroup
 
 `KernelRank.exists_translation_generator` obtains the generator of translation on a
 finite-dimensional complex translate space from `KernelRank.exists_eq_exp_of_semigroup`.
-Either alternative proof of the semigroup theorem gives the same conclusion.
+An alternative proof of the semigroup theorem gives the same conclusion. This is shown for
+the finite-difference proof and for the nonstandard proof with sequences; the proof in
+nonstandard language, `NSA.exists_eq_exp_of_semigroup`, has the same statement.
 -/
 
 namespace Experiments
