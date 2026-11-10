@@ -160,30 +160,38 @@ The proof does not bound `x / ε` beforehand: Euler's step itself shows that it 
 Measure the time and the change on the common scale `η = ε + ‖x‖`. As
 `ε / η + ‖x / η‖ = 1`, both are finite without any estimate: `x / η` has a standard part `B`,
 and `ε / η` is infinitely close to `a = 1 - ‖B‖`. The pair `(a, B)` is the generator in
-homogeneous coordinates: `A = B / a`, once `a ≠ 0` is known. Euler's step is proved for two
-arbitrary continuous semigroups: if `M` takes steps of size `δ` while `E` takes steps of size
-`η`, with `δ / η` infinitely close to `a`, and the steps `M δ` and `E η` differ by `η` times an
-infinitesimal, then `M (s a) = E s`. For `E s = exp (s B)` this gives `M (s a) = exp (s B)`.
+homogeneous coordinates: `A = B / a`, once `a ≠ 0` is known. Compare `M`, taking steps of size
+`ε`, with `E s = exp (s B)`, taking steps of size `η`. Their single steps differ by `η` times an
+infinitesimal. After `N` steps with `s - η ≤ N η ≤ s`, their times are infinitely close to
+`s a` and `s`. Controlling the accumulated error gives `M (s a) = exp (s B)`.
 Now `a = 0` would mean `exp (s B) = M 0 = 1` for all `s ≥ 0`, so `B = 0` and `a = 1`. Hence
 `a ≠ 0`, and `M t = exp (t B / a)`.
 
-The only ordinary estimate is the cost of replacing `n` steps of one semigroup by `n` steps of
-another, one at a time. The argument has three formalizations:
+The formalizations differ in how they control that error:
 
 * **Isabelle/HOL** ([Semigroup_NSA.thy](Isabelle/Semigroup_NSA.thy)). Isabelle's
   `HOL-Nonstandard_Analysis` library provides hyperreals, hypernatural numbers and nonstandard
   vectors as an ultrapower, a `transfer` method, infinite closeness `≈`, standard parts of
-  finite hyperreals, and nonstandard characterizations of limits. Euler's step (`euler_step`)
-  takes a hypernatural number `N` of steps, with `N η ≤ s < (N + 1) η`, and transfers the
-  ordinary estimate as it stands. The proof adds two general facts that the library lacks:
-  standard parts of bounded vectors in finite-dimensional (Heine–Borel) spaces, and continuity
-  on a set, here `[0, ∞)`, at infinitesimal scale.
+  finite hyperreals, and nonstandard characterizations of limits. Its ordinary estimate is
+  purely algebraic: if `‖u‖, ‖v‖ ≤ exp h` and `h ≥ 0`, then
+  `‖uⁿ - vⁿ‖ ≤ n exp(n h) ‖u - v‖`. The proof uses
+  `uⁿ⁺¹ - vⁿ⁺¹ = u (uⁿ - vⁿ) + (u - v) vⁿ`, with no commutativity assumption.
+  For `u = M ε` and `v = exp (η B)`, the normalization gives both norm bounds with `h = η`.
+  Transfer makes the accumulated error at most
+  `N η exp(N η) ‖(u - v) / η‖`, which is infinitesimal.
+
+  Thus there is no separate comparison theorem for two arbitrary semigroups and no need to
+  bound their values on compact time intervals. The proof still adds standard parts of bounded
+  vectors in finite-dimensional (Heine–Borel) spaces. For continuity at nonnegative arguments,
+  it extends `M` to the whole line by `M (max t 0)` and uses the library's nonstandard continuity.
 * **Lean** ([NonstandardSemigroup.lean](Experiments/NonstandardSemigroup.lean)). Mathlib has
   hyperreals, as sequences along an ultrafilter, but no transfer principle, so the proof works
-  with those sequences directly. Euler's step (`eq_of_infinitesimal_steps`) is a statement
-  about limits along an arbitrary filter. The ultrafilter makes the standard part `B` exist
-  without extracting a subsequence.
-* **Lean draft** ([NonstandardDraft.lean](Experiments/NonstandardDraft.lean)). The same proof
+  with those sequences directly. Euler's step (`eq_of_infinitesimal_steps`) compares two
+  arbitrary continuous semigroups, with step sizes `δ ≤ η` and `δ / η` tending to `a`, along an
+  arbitrary filter. It bounds both semigroups on compact time intervals and replaces their
+  steps one at a time. The ultrafilter makes the standard part `B` exist without extracting a
+  subsequence.
+* **Lean draft** ([NonstandardDraft.lean](Experiments/NonstandardDraft.lean)). The Lean argument
   written the way a nonstandard analyst would, against a small hand-made interface: the
   ultrapower `Hyp α` along `hyperfilter ℕ`, natural extensions `ext f`, internal membership,
   and `x ≈ₕ y` for "infinitely close". 16 interface lemmas are left as `sorry`: one-variable
@@ -205,7 +213,7 @@ the main proof keeps it:
 | Integral smoothing (used) | `Semigroup.lean` | 96 | 87 |
 | Finite differences | `GeneratorBound.lean` + `FiniteDifferenceSemigroup.lean` | 256 | 233 |
 | Nonstandard analysis, Lean | `NonstandardSemigroup.lean` | 206 | 190 |
-| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 310 | 283 |
+| Nonstandard analysis, Isabelle/HOL | `Semigroup_NSA.thy` | 275 | 253 |
 
 The bound on the difference quotients, `GeneratorBound.lean`, is 124 lines (112 nonblank) of
 the finite-difference proof. The two nonstandard proofs split as follows (physical / nonblank
@@ -214,14 +222,23 @@ lines):
 | Part | Lean | Isabelle/HOL |
 |---|---:|---:|
 | Headers, imports and overview | 45 / 33 | 29 / 24 |
-| Ordinary analysis: replacing the steps of one semigroup by those of another | 35 / 34 | 54 / 50 |
-| Nonstandard part: Euler's step, the theorem; in Isabelle also standard parts and continuity | 126 / 123 | 227 / 209 |
-| Total | 206 / 190 | 310 / 283 |
+| Ordinary helper lemmas: step replacement in Lean; powers in Isabelle | 35 / 34 | 44 / 40 |
+| Remaining proof: Euler's step and the theorem; in Isabelle also standard parts and continuity | 126 / 123 | 202 / 189 |
+| Total | 206 / 190 | 275 / 253 |
 
-Euler's step takes 58 lines in Lean and 79 in Isabelle, and the theorem 68 and 81. The rest of
-the difference is general facts that Mathlib provides in the language of filters and the
-Isabelle proof has to add: standard parts of bounded vectors (37 lines) and continuity on a set
-at infinitesimal scale (26 lines).
+Lean separates Euler's step (58 lines) from the theorem (68 lines). Isabelle combines them in
+139 lines, including the specialization of the power estimate. Its additional infrastructure
+includes standard parts of bounded vectors (37 lines) and half-line continuity (22 lines);
+Mathlib supplies the corresponding facts in the language of filters.
+
+Replacing the general semigroup comparison and arbitrary-set continuity from revision
+[`96c1870`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/96c18702e5d78c3e0f3fa84df3ee8748507132d6)
+removes 35 physical and 30 nonblank lines from the Isabelle theory, counting every helper,
+comment and blank line.
+It is still larger than the 96-line integral proof. These are formalization sizes, not a
+language-independent measure of mathematical complexity. The power bound uses `‖1‖ = 1`,
+which Isabelle's `real_normed_algebra_1` supplies; the Lean theorem does not impose that norm
+normalization.
 
 ## A purely nonstandard approach
 

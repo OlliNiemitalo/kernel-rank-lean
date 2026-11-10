@@ -11,7 +11,7 @@
 - `Isabelle/`: an Isabelle/HOL version of the nonstandard semigroup proof (session
   `KernelRank_NSA`, theory `Semigroup_NSA.thy`), described in the README under "Alternative
   proofs of the semigroup step". It, `Experiments/NonstandardSemigroup.lean` and the draft
-  follow the same argument (see "Mathematics of the nonstandard proofs" below).
+  share the same normalization (see "Mathematics of the nonstandard proofs" below).
 - `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
 - `README.md`: theorem statement, file table, commit history with Lean line counts, the
   alternative proofs, the purely nonstandard approach, and the suggested kernel-optimizer
@@ -108,17 +108,22 @@
   standard part `B` (finite dimensions), and `ε / η ≈ a = 1 - ‖B‖`. Euler's step gives
   `M (s a) = exp (s B)`; `a = 0` would force `B = 0`, so `A = B / a`. There is no bound on
   `x / ε`; `Experiments/GeneratorBound.lean` now serves only the finite-difference proof.
-- Euler's step is for two arbitrary continuous semigroups with step sizes `δ ≤ η`: take `N`
-  steps with `N η ≤ s < (N + 1) η` and replace the steps of `M` by those of `E` one at a time
-  (an induction with a remaining time `r` of `E`). Names: `replace_steps`, `euler_step`,
-  `semigroup_eq_exp` in Isabelle; `norm_replace_steps_le`, `eq_of_infinitesimal_steps`,
-  `exists_eq_exp_of_semigroup_nonstandard` in Lean.
+- Lean's Euler step compares two arbitrary continuous semigroups with step sizes `δ ≤ η`,
+  using compact-interval bounds and an induction with a remaining time `r` of `E`.
+  Names: `norm_replace_steps_le`, `eq_of_infinitesimal_steps`,
+  `exists_eq_exp_of_semigroup_nonstandard`.
+- Isabelle's `semigroup_eq_exp` instead uses `power_difference_bound`:
+  `‖x^n - y^n‖ ≤ n exp(n h) ‖x - y‖` when both norms are at most `exp h`, `h ≥ 0`.
+  The normalization bounds `‖M ε‖` and `‖exp (η B)‖` by `exp η`; `semigroup_power` identifies
+  their powers with the corresponding times. No commutativity or compact-time bounds are
+  needed. The estimate includes `n = 0`. Its use of `‖1‖ = 1` is justified by Isabelle's
+  `real_normed_algebra_1`; do not silently add that assumption to the Lean theorem.
 - Isabelle: `η` and `x / η` are defined as ordinary functions of the step `h` and evaluated
   at `ε` with `*f*`, so each ordinary identity about them is one `transfer`. This avoids
-  `scaleHR`. `euler_step` takes a hypernatural `N` (transferred `floor_step`) and transfers
-  `replace_steps` as it stands.
-- Isabelle: `approx_continuous_on` is nonstandard continuity on a set (the library has only
-  `isNSCont`, for `UNIV`); `starset_atLeast` turns `x ∈ *s* {a..}` into `star_of a ≤ x`;
+  `scaleHR`. Transfer selects a hypernatural `N` with `s - η ≤ N η ≤ s` and applies the
+  ordinary power estimate. The old `replace_steps`, `euler_step`, `floor_step`,
+  `approx_continuous_on` and `starset_atLeast` helpers are no longer used.
+- Isabelle: `approx_continuous_halfline` extends `f` by `f (max t 0)` to reuse `isNSCont`.
   `standard_part` (Heine–Borel) also returns the norm bound.
 - Lean draft: one-variable transfer only, so the step count and both times are functions of
   the step `h` (`T`, `K`), evaluated at `ε` or at `ext η ε`; Euler's step is inline.
@@ -178,3 +183,8 @@
   linear arithmetic: `unfolding of_nat_Suc distrib_right by linarith+` keeps them.
 - `intro rule[OF ... fact]` with a conditional `fact` leaves its trivial premises as extra
   subgoals: finish with `simp_all`, not `simp`.
+- Several exponential lemmas (`isCont_exp`, `norm_exp_bounds`, `exp_of_nat_mult`) require a
+  field, not a general algebra. For the algebra-valued exponential orbit use
+  `exp_scaleR_has_vector_derivative_right` and `semigroup_power`.
+- When rewriting `M (real n * h)` by `semigroup_power`, apply that rewrite before `mult_ac`;
+  otherwise normalization may reorder its argument and prevent the match.
