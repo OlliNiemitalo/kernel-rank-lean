@@ -109,7 +109,7 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   `separableRank_radial_eq_iff` shows that `r + 2 c` horizontal–vertical pass pairs (`2 r + 4 c`
   1-D passes) is the exact minimum over `ℝ` for that representation.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
-  circular low-pass filter `J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
+  circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
   separable rank because of its algebraic radial decay, and can be approximated by complex-rate
   Gaussians
   ([DSP Stack Exchange #58449](https://dsp.stackexchange.com/questions/58449/efficient-implementation-of-2-d-circularly-symmetric-low-pass-filter)).
@@ -119,10 +119,15 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   whose directional-derivative decomposition is the equal-factor case of `re_prod_eq_sum_re`) to
   any smooth radial kernel `φ(x² + y²)` produces the pure polar-separable harmonic
   `(x + i y)^m φ^(m)(x² + y²) = r^m exp(i m θ) φ^(m)(r²)` with no lower-order radial derivative
-  terms. By convolution associativity, smoothing an image once with an isotropic multi-Gaussian
-  low-pass filter and then applying compact derivative stencils yields grid-isotropic gradients
-  and higher-order steerable edge detectors
-  ([DSP Stack Exchange #58287](https://dsp.stackexchange.com/a/58287/15347)).
+  terms. When `φ` is a well-formed multi-Gaussian profile with `r` real and `c` nonreal
+  upper-half-plane rates (all `λᵢ ≠ 0`), `φ^(m)` is again a well-formed multi-Gaussian profile at
+  the same rates (weighted by `λᵢ^m`), so differentiating the continuous-space kernel on `ℝ²`
+  analytically before sampling—preserving exact isotropic derivative response up to Nyquist, as in
+  [DSP Stack Exchange #58287](https://dsp.stackexchange.com/a/58287/15347)—yields exact
+  continuous-domain 2-way real separable ranks `(⌊m / 2⌋ + 1) (r + 2 c)` for the `cos(m θ)`
+  kernel and `⌈m / 2⌉ (r + 2 c)` for the `sin(m θ)` kernel (in particular, `r + 2 c` each for the
+  `m = 1` gradient pair, with `x` or `y` absorbed directly into one 1-D factor; sampling those
+  1-D factors gives at most that many discrete pass pairs).
 * **3-D volumetric filtering and band-limited wave propagation (`d = 3`).** In 3-D imaging
   (cryo-EM, CT, MRI) and dispersion-free band-limited acoustic time-stepping—where advancing the
   constant-speed wave equation on a coarse Cartesian grid applies a spherically symmetric radial
@@ -173,7 +178,8 @@ Outside the proof:
 |---|---|
 | [Experiments](Experiments) | Lean library: alternative proofs of the semigroup step, with their own [README](Experiments/README.md) |
 | [Isabelle](Isabelle) | Isabelle/HOL session `KernelRank_NSA`: a nonstandard proof of the semigroup step |
-| [scripts](scripts), [.githooks](.githooks) | Setup, tool wrappers, and the checks run before each commit |
+| [paper](paper) | Preprint manuscript (`main.tex`, `main.pdf`, `metadata.json`), published on aiXiv as [`aixiv.261111.000007`](https://aixiv.science/abs/aixiv.261111.000007) |
+| [scripts](scripts), [.githooks](.githooks) | Setup, tool wrappers, paper build/submission scripts, and the checks run before each commit |
 
 ## Commit history and Lean source size
 

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Compiles paper/main.tex to paper/main.pdf using a static Tectonic binary in .tmp/bin.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+cd "$repo"
+
+tectonic_bin="$tmp/bin/tectonic"
+tectonic_ver="0.15.0"
+
+if [ ! -x "$tectonic_bin" ]; then
+  mkdir -p "$tmp/bin"
+  arch="$(uname -m)"
+  curl -fsSL \
+    "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${tectonic_ver}/tectonic-${tectonic_ver}-${arch}-unknown-linux-musl.tar.gz" \
+    | tar -xz -C "$tmp/bin"
+fi
+
+"$tectonic_bin" -X compile paper/main.tex --outdir paper

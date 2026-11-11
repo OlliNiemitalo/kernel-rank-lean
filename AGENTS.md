@@ -18,7 +18,13 @@
   `KernelRank_NSA`, theory `Semigroup_NSA.thy`), also described in `Experiments/README.md`.
   All nonstandard proofs share the same normalization (see "Mathematics of the nonstandard
   proofs" below).
-- `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
+- `paper/`: LaTeX source (`main.tex`), compiled PDF (`main.pdf`), and metadata
+  (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via
+  `scripts/build-paper` (static Tectonic in `.tmp/bin`) and submitted/updated via
+  `scripts/submit-aixiv` (reads `AIXIV_GITHUB_COPILOT_TOKEN` from the environment; never commit
+  tokens).
+- `scripts/`: tool wrappers, setup, paper scripts, and the check script; `.githooks/`: the
+  pre-commit hook.
 - `README.md`: theorem statements, potential applications, file table, commit history with Lean
   line counts, a summary of the alternative proofs, and the suggested kernel-optimizer citation.
 

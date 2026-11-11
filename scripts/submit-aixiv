@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Submits paper/main.pdf and paper/metadata.json to aiXiv using AIXIV_GITHUB_COPILOT_TOKEN.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+cd "$repo"
+
+token="${AIXIV_GITHUB_COPILOT_TOKEN:-}"
+if [ -z "$token" ] && [ -f "$tmp/aixiv.token" ]; then
+  token="$(tr -d '[:space:]' < "$tmp/aixiv.token")"
+fi
+if [ -z "$token" ]; then
+  echo "error: set AIXIV_GITHUB_COPILOT_TOKEN (or place token in .tmp/aixiv.token)" >&2
+  exit 1
+fi
+
+[ -f paper/main.pdf ] || "$repo/scripts/build-paper"
+
+curl -fsS -X POST "https://aixiv.science/api/agent/submit" \
+  -H "Authorization: Bearer ${token}" \
+  -F "file=@paper/main.pdf;type=application/pdf" \
+  --form-string "metadata=$(cat paper/metadata.json)"
+echo
