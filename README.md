@@ -97,13 +97,19 @@ Gaussians alone are monotone in `r²` and cannot form flat passbands or zero cro
 complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
 `exp(-α r²) cos(β r² + θ)` that can approximate oscillatory and flat-top isotropic kernels.
 
-* **2-D circularly symmetric blur, bokeh, and optical point-spread functions.** Camera defocus
-  disks, glare kernels, and Airy diffraction patterns `(J₁(r) / r)²` in microscopy and
-  photolithography optical proximity correction can be approximated by sums of `r` real and `c`
-  complex-conjugate Gaussians, as in
-  [kernel-optimizer](https://github.com/OlliNiemitalo/kernel-optimizer). Here
-  `separableRank_radial_eq_iff` shows that `r + 2 c` horizontal–vertical pass pairs (`2 r + 4 c`
-  1-D passes) is the exact minimum over `ℝ` for that representation.
+* **2-D circularly symmetric blur, bokeh, and `float16` conditioning.** Camera defocus disks,
+  glare kernels, and Airy diffraction patterns `(J₁(r) / r)²` in microscopy and photolithography
+  optical proximity correction can be approximated by sums of `r` real and `c` complex-conjugate
+  Gaussians, as in [kernel-optimizer](https://github.com/OlliNiemitalo/kernel-optimizer). Here
+  `separableRank_radial_eq_iff` shows that `N = r + 2 c` horizontal–vertical pass pairs
+  (`2 r + 4 c` 1-D passes) is the exact minimum over `ℝ` for that representation. While `N` is
+  invariant, splitting high-order approximations component-by-component causes up to `595×`–`1,110×`
+  peak channel cancellation at `N = 12`, producing `4.4`–`6.8 / 255` HDR bokeh errors in IEEE
+  `float16` intermediates; orthonormalizing `rowSpan(K)` via QR + symmetric eigendecomposition
+  ([`Applications/blur_2d.py`](Applications/blur_2d.py)) achieves the global nuclear-norm minimum
+  and keeps `float16` max error at `≤ 0.17 / 255` (`11.3×`–`34.3×` faster than direct `155 × 155`
+  2-D convolution at `1920 × 1080` RGBA on an RTX 4070 Ti Super), in contrast to `d ≥ 3` where
+  Kruskal's theorem forbids continuous `GL_R(ℝ)` basis rotations.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
   circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
   separable rank because of its algebraic radial decay, and can be approximated by complex-rate
@@ -124,15 +130,20 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   kernel and `⌈m / 2⌉ (r + 2 c)` for the `sin(m θ)` kernel (in particular, `r + 2 c` each for the
   `m = 1` gradient pair, with `x` or `y` absorbed directly into one 1-D factor; sampling those
   1-D factors gives at most that many discrete pass pairs).
-* **3-D volumetric filtering and band-limited wave propagation (`d = 3`).** In 3-D imaging
-  (cryo-EM, CT, MRI) and dispersion-free band-limited acoustic time-stepping—where advancing the
-  constant-speed wave equation on a coarse Cartesian grid applies a spherically symmetric radial
-  operator—direct `L³` stencils quickly become prohibitive. For `r` real and `c`
-  complex-conjugate Gaussians, `separableRank_radial_gaussian_profile` gives exact real 3-way
-  rank `r + 3 c`: the alternating root-of-unity identity `re_prod_eq_sum_re` realizes each
-  complex-rate Gaussian in `3` real 3-way terms (`9` real 1-D passes on real-valued volume
-  buffers, rather than `2^(3 - 1) = 4` terms / `12` passes from naive real-and-imaginary
-  expansion), and proves that no real 3-way factorization uses fewer than `r + 3 c` terms.
+* **3-D volumetric filtering and isotropic acoustic wave simulation (`d = 3`).** In 3-D imaging
+  (cryo-EM, CT, MRI) and explicit wave-equation leapfrog propagation `p^{n+1} + p^{n-1} = M * p^n`
+  targeting the radial symbol `2 cos(ν ‖k‖₂)`, direct `W³` stencils scale cubically while purely
+  axial stencils cannot generate mixed `k_x² k_y²` terms. Kowalczyk and van Walstijn's 27-point
+  `IWB` room-acoustics stencil is identically a single real Gaussian `(r = 1, c = 0, L = 1)` plus a
+  center tap, incurring `9.23%` diagonal phase-velocity error by `0.80π`. Generalizing to `r` real
+  and `c` complex-conjugate Gaussians (`separableRank_radial_gaussian_profile`, exact 3-way rank
+  `r + 3 c` via `re_prod_eq_sum_re` vs. `r + 4 c` naive; `7` vs. `9` for `deg P = 1` via
+  `re_coeff_prod_eq_sum_re`), certified von Neumann-stable propagators in
+  [`Applications/acoustics_3d.py`](Applications/acoustics_3d.py) (`R = 7`, `W = 13`, `ν = 1.00`)
+  reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.055%` (extending the
+  `0.1%`-accurate bandwidth from `0.091π` to `0.82π`—`731×` less GPU memory and `381×`–`529×`
+  faster wall-clock time on an RTX 4070 Ti Super at equal dispersion accuracy), while half-sample
+  even reflection enforces exact rigid-wall Neumann boundary conditions.
 * **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
   Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
   sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center
@@ -173,6 +184,7 @@ Outside the proof:
 |---|---|
 | [Experiments](Experiments) | Lean library: alternative proofs of the semigroup step, with their own [README](Experiments/README.md) |
 | [Isabelle](Isabelle) | Isabelle/HOL session `KernelRank_NSA`: a nonstandard proof of the semigroup step |
+| [Applications](Applications) | Reproducible 2-D disc-blur conditioning and 3-D acoustic wave propagation optimizations and Triton GPU benchmarks ([README](Applications/README.md)) |
 | [paper](paper) | Preprint manuscript (`main.tex`, `main.pdf`, `metadata.json`), published on aiXiv as [`aixiv.261111.000007`](https://aixiv.science/abs/aixiv.261111.000007) |
 | [scripts](scripts), [.githooks](.githooks) | Setup, tool wrappers, paper build/submission scripts, and the checks run before each commit |
 
@@ -200,7 +212,7 @@ size, not mathematical complexity.
 | [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 | [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
-| This revision | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
+| [`9722ff5`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/9722ff5b2e2f788874a99378165af2206f0d7d42) | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25

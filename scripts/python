@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Runs Python from `.tmp/venv` with all caches confined to `.tmp/cache`.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+
+export MPLCONFIGDIR="$tmp/cache/matplotlib"
+export UV_CACHE_DIR="$tmp/cache/uv"
+export TRITON_DEFAULT_FP_FUSION=1
+mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR"
+
+if [ ! -x "$tmp/venv/bin/python" ]; then
+  uv venv --python /usr/bin/python3 "$tmp/venv" >&2
+  uv pip install --python "$tmp/venv/bin/python" numpy scipy matplotlib torch >&2
+fi
+
+exec "$tmp/venv/bin/python" -u "$@"

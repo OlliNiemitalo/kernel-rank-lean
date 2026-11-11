@@ -19,11 +19,17 @@
   `KernelRank_NSA`, theory `Semigroup_NSA.thy`), also described in `Experiments/README.md`.
   All nonstandard proofs share the same normalization (see "Mathematics of the nonstandard
   proofs" below).
-- `paper/`: LaTeX source (`main.tex`), compiled PDF (`main.pdf`), and metadata
-  (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via
-  `scripts/build-paper` (static Tectonic in `.tmp/bin`) and submitted/updated via
-  `scripts/submit-aixiv` (reads `AIXIV_GITHUB_COPILOT_TOKEN` from the environment; never commit
-  tokens).
+- `Applications/`: reproducible Python/SciPy/PyTorch/Triton numerical optimization, simulation,
+  and GPU benchmark scripts (`blur_2d.py`, `acoustics_3d.py`, `generate_figures.py`, JSON
+  results) accompanying Section 5 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
+  and all Matplotlib/`uv`/Triton caches inside `.tmp/`). In Triton kernels with wider stencils
+  (e.g. `L = 77`), use a runtime `range(1, L_val + 1)` loop rather than `tl.static_range` to
+  avoid register spilling.
+- `paper/`: LaTeX source (`main.tex`), vector figures (`fig_blur_2d.pdf`, `fig_acoustics_3d.pdf`),
+  compiled PDF (`main.pdf`), and metadata (`metadata.json`) for the aiXiv preprint
+  `aixiv.261111.000007`; built via `scripts/build-paper` (static Tectonic in `.tmp/bin`) and
+  submitted/updated via `scripts/submit-aixiv` (reads `AIXIV_GITHUB_COPILOT_TOKEN` from the
+  environment; never commit tokens).
 - `scripts/`: tool wrappers, setup, paper scripts, and the check script; `.githooks/`: the
   pre-commit hook.
 - `README.md`: theorem statements, potential applications, file table, commit history with Lean

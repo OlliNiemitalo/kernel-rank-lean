@@ -2,6 +2,7 @@
 
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{microtype}
 \usepackage[dvipsnames]{xcolor}
@@ -50,7 +51,7 @@ We give a complete machine-checked characterization in Lean~4 (with Mathlib) of 
 (3)~over $\R$, a continuous radial profile $\varphi(\|x\|^2)$ has exact $d$-way separable rank $\sum_i c_d(P_i,\lambda_i)$ where each real-rate component ($\ImPart\lambda_i = 0$) costs $(d-1)\deg P_i + 1$ real $d$-way products (achieved by real Lagrange interpolation) and each nonreal conjugate-pair component ($\ImPart\lambda_i > 0$) costs $R_i = 2(d-1)\deg P_i + d$ real $d$-way products, achieved via an alternating $R_i$-point root-of-unity polynomial-product identity (giving $d$ rather than $2^{d-1}$ real products for a complex Gaussian when $\deg P_i = 0$) and proved optimal by Alder--Strassen degree peeling over $\R$; and
 (4)~in $d = 2$, scalar extension $\R \hookrightarrow \C$ preserves rank unconditionally, whereas for $d \ge 3$ it can strictly lower rank (e.g.\ $\RePart(e^{i\|x\|^2})$ has complex rank $2$ and real rank $d$, and $\|x\|^2\cos(\|x\|^2)$ in $d = 3$ has complex rank $6$, real border rank at most $6$, and exact real rank $7$); moreover, in $d = 2$ the exact rank equals the degree of the minimal monic constant-coefficient half-line differential annihilator $p(D)\varphi_{\C} = 0$ ($p \in \C[X]$).
 
-Necessity reduces to showing that a continuous one-parameter semigroup $M : [0,\infty) \to \mathcal{A}$ is an exponential $M(t) = \exp(tA)$. Alongside the $96$-line Banach-algebra integral-smoothing proof used in the main development, we formalize four finite-dimensional alternatives---one by finite differences in Lean~4 and three by Euler's infinitesimal step in Lean~4 and Isabelle/HOL using a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$ that avoids any \emph{a priori} difference-quotient bound---and compare their lengths, library reliance, and generality. Finally, we connect the root-of-unity identity to two-dimensional harmonic (``beach-ball'') differential operators and evaluate concrete pass-count reductions for steerable derivative filter banks and three-dimensional isotropic propagators.
+Necessity reduces to showing that a continuous one-parameter semigroup $M : [0,\infty) \to \mathcal{A}$ is an exponential $M(t) = \exp(tA)$. Alongside the $96$-line Banach-algebra integral-smoothing proof used in the main development, we formalize four finite-dimensional alternatives---one by finite differences in Lean~4 and three by Euler's infinitesimal step in Lean~4 and Isabelle/HOL using a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$ that avoids any \emph{a priori} difference-quotient bound---and compare their lengths, library reliance, and generality. Finally, we connect the root-of-unity identity to planar harmonic (``beach-ball'') differential operators and evaluate two GPU-verified numerical applications on an NVIDIA RTX~4070~Ti~Super: (i)~minimax $2$-D circular lens blur, showing how nuclear-norm-optimal $\mathrm{GL}_N(\R)$ rebalancing on $\operatorname{rowSpan}(K)$ eliminates up to $1{,}110\times$ intermediate cancellation so \texttt{float16} buffers stay within $0.16/255$ of \texttt{float64} (in contrast to $d \ge 3$, where Kruskal's theorem forbids continuous basis rotations), and (ii)~explicit $3$-D acoustic wave-equation leapfrog propagators, identifying Kowalczyk and van~Walstijn's $27$-point IWB stencil as the single-real-Gaussian ($R = 1$) baseline and designing certified von~Neumann-stable multi-Gaussian propagators ($R = 4\text{--}9$) that cut directional phase-velocity error up to $0.80\pi$ from $9.23\%$--$19.71\%$ to $0.055\%$ ($381\times$--$529\times$ faster wall-clock and $731\times$ less memory than $27$-point IWB at a $0.1\%$ dispersion tolerance).
 \end{abstract}
 
 \section{Introduction}
@@ -65,7 +66,7 @@ For circularly or spherically symmetric (\emph{radial}) kernels in dimension $d 
 \[
   K(x) = \varphi\!\left(\sum_{j=0}^{d-1} x_j^2\right), \qquad x = (x_0,\dots,x_{d-1}) \in \R^d,
 \]
-Maxwell's characterization of the normal distribution implies that a continuous nonvanishing radial kernel of separable rank $1$ has a Gaussian profile $\varphi(s) = \alpha e^{\lambda s}$. Real-rate Gaussians ($\lambda < 0$), however, are strictly monotone and convex in $s = \|x\|^2$; nonnegative combinations of them cannot exhibit flat passbands, sharp cutoffs, or zero crossings. In image processing, optics, and numerical wave propagation, O.~Niemitalo~\cite{niemitalo2019lowpass,niemitalo_kernel_optimizer} and related filter-design work~\cite{lampert2006anisotropic} approximate non-Gaussian radial profiles---such as circular defocus disks, Airy diffraction patterns $(J_1(r)/r)^2$, and ideal circular low-pass filters $\omega_c J_1(\omega_c r)/(2\pi r)$---by sums of \emph{complex-rate} Gaussians $\RePart(\beta e^{(-\alpha + i\omega)\|x\|^2})$, whose damped radial oscillations $\cos(\omega\|x\|^2 + \theta)$ synthesize sharp transitions and sidelobe rings while keeping finite separable rank.
+Maxwell's characterization of the normal distribution implies that a continuous nonvanishing radial kernel of separable rank $1$ has a Gaussian profile $\varphi(s) = \alpha e^{\lambda s}$. Real-rate Gaussians ($\lambda < 0$), however, are strictly monotone and convex in $s = \|x\|^2$; nonnegative combinations of them cannot exhibit flat passbands, sharp cutoffs, or zero crossings. Gaussian mixtures among radial kernels. In image processing, optics, and numerical wave propagation, O.~Niemitalo~\cite{niemitalo2010blur,niemitalo2019lowpass,niemitalo_kernel_optimizer} and related filter-design work~\cite{lampert2006anisotropic} approximate non-Gaussian radial profiles---such as circular defocus disks, Airy diffraction patterns $(J_1(r)/r)^2$, and ideal circular low-pass filters $\omega_c J_1(\omega_c r)/(2\pi r)$---by sums of \emph{complex-rate} Gaussians $\RePart(\beta e^{(-\alpha + i\omega)\|x\|^2})$, whose damped radial oscillations $\cos(\omega\|x\|^2 + \theta)$ synthesize sharp transitions and sidelobe rings while keeping finite separable rank.
 
 This raises three mathematical questions:
 \begin{enumerate}[leftmargin=2em,itemsep=2pt]
@@ -82,17 +83,17 @@ All numbered theorems, propositions, and lemmas in Sections~\ref{sec:core}--\ref
   \item \textbf{Unified $d$-dimensional classification (Theorem~\ref{thm:classification}, \leanid{separableRank\_radial\_lt\_top\_iff\_exists}):} For every $d \ge 2$ and every $\varphi : \R \to \R$ continuous on $[0,\infty)$, the radial kernel $x \mapsto \varphi(\sum_{j=0}^{d-1} x_j^2)$ has finite $d$-way separable rank if and only if $\varphi$ agrees on $[0,\infty)$ with a canonical real exponential-polynomial representation $\sum_i \RePart(P_i(s)e^{\lambda_i s})$.
   \item \textbf{Exact $d$-D complex radial rank (Theorem~\ref{thm:complex_nd}, \leanid{separableRank\_radial\_complex\_eq\_iff}):} For $d \ge 2$ and $\psi : \R \to \C$ continuous on $[0,\infty)$, $\srank(x \mapsto \psi(\|x\|^2)) = N$ if and only if $\psi(s) = \sum_{\mu \in S} P_\mu(s)e^{\mu s}$ on $[0,\infty)$ for distinct rates $\mu \in S$ and nonzero polynomials $P_\mu$ satisfying $\sum_{\mu \in S} ((d-1)\deg P_\mu + 1) = N$. The upper bound uses shifted root-of-unity Fourier extraction on truncated exponential polynomials; the lower bound uses multi-mode Alder--Strassen degree peeling.
   \item \textbf{Exact $d$-D real radial rank for all degrees (Theorem~\ref{thm:real_nd}, \leanid{separableRank\_radial\_eq\_iff}):} For every $d \ge 2$, $\srank(x \mapsto \varphi(\|x\|^2)) = N$ over $\R$ if and only if $\varphi$ agrees on $[0,\infty)$ with a well-formed representation whose $d$-dimensional cost (\leanid{multiTotalCost}) equals $N$, counting $(d-1)\deg P_i + 1$ for real rates ($\ImPart\lambda_i = 0$, via real Lagrange interpolation) and $R_i = 2(d-1)\deg P_i + d$ for nonreal rates ($\ImPart\lambda_i > 0$, via an alternating root-of-unity polynomial-product identity \leanid{re\_coeff\_prod\_eq\_sum\_re} and Alder--Strassen peeling over $\R$). Specializing to $\deg P_i = 0$ gives $r + d c$ ($d$ real terms rather than $2^{d-1}$ per complex Gaussian, \leanid{separableRank\_radial\_gaussian\_profile}), and specializing to $d = 2$ recovers $\mathrm{totalCost}$ (\leanid{separableRank\_radial\_two\_eq\_iff}) alongside the minimal differential-annihilator characterization (Theorem~\ref{thm:annihilator}).
-  \item \textbf{Comparative formalization of the semigroup step (Section~\ref{sec:semigroup}):} We compare the $96$-line Banach-algebra integral-smoothing proof against a $256$-line finite-difference proof in Lean~4 and three finite-dimensional nonstandard-analysis proofs ($206$ lines in Lean with ultrafilter sequences, $399$ lines in Lean with an ultrapower interface, and $275$ lines in Isabelle/HOL), all simplified via a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$.
-  \item \textbf{Harmonic differential operators, worked examples, and pass-count bounds (Section~\ref{sec:applications}):} Specializing the root-of-unity identity to equal directional-derivative factors recovers and unifies odd and even planar ``beach-ball'' harmonic operators $\RePart((\partial_x + i\partial_y)^m)$~\cite{niemitalo2019beachball,perona1995deformable}, yields exact continuous-domain 2-way separable ranks for analytically differentiated multi-Gaussian steerable filters~\cite{niemitalo2019angle}, establishes continuous-domain pass-count lower bounds in $2$-D alongside divide-and-conquer pass-tree upper bounds in $d$-D, and compares operation counts and numerical SVD/CP ranks across concrete 2-D and 3-D filter designs.
+  \item \textbf{Comparative formalization of the semigroup step (Section~\ref{sec:semigroup}):} We compare the $96$-line Banach-algebra integral-smoothing proof with a $256$-line finite-difference proof in Lean~4 and three finite-dimensional nonstandard proofs ($206$ lines in Lean via ultrafilter sequences, $399$ lines in Lean via an ultrapower interface, and $275$ lines in Isabelle/HOL), all simplified by the homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$.
+  \item \textbf{Steerable operators, $2$-D lens blur, and $3$-D acoustic propagation (Section~\ref{sec:applications}):} Specializing the root-of-unity identity to equal directional-derivative factors recovers odd and even planar ``beach-ball'' harmonic operators $\RePart((\partial_x + i\partial_y)^m)$~\cite{niemitalo2019beachball,perona1995deformable} and pass-count bounds for steerable derivative banks~\cite{niemitalo2019angle}. Complementing the formal proofs, reproducible numerical scripts and GPU benchmarks in \texttt{Applications} evaluate (i)~$2$-D circular disc blur across $18$ component families, showing how $\mathrm{GL}_N(\R)$ rebalancing on $\operatorname{rowSpan}(K)$ removes $595\times$--$1{,}110\times$ channel cancellation for \texttt{float16} rendering, and (ii)~explicit $3$-D acoustic wave propagators certified over the $3$-D Brillouin zone, reducing isotropic dispersion up to $0.80\pi$ by two orders of magnitude over $7$-point and $27$-point FDTD schemes~\cite{kowalczyk2011room}.
 \end{itemize}
 
 \subsection{Related work}
 
-\paragraph{Radial characterizations and Gaussian sum approximations.}
-Maxwell's kinetic-theory argument (1860) and Schoenberg's characterization of completely monotone radial functions~\cite{schoenberg1938metric} identify single Gaussians and positive Gaussian mixtures among radial kernels. For oscillatory or compactly supported radial kernels in scientific computing, Beylkin and Monz\'on~\cite{beylkin2005exponentials} approximate profiles and Green's functions by short sums of complex exponentials and Gaussians; in image filtering, Lampert and Wirjadi~\cite{lampert2006anisotropic} study anisotropic Gaussian separations, while Niemitalo~\cite{niemitalo2019lowpass,niemitalo_kernel_optimizer} fits circular defocus and low-pass profiles directly with complex-variance Gaussians. None of these works establishes a machine-checked converse for arbitrary signed finite-rank radial kernels or exact $d$-way real CP ranks across higher-degree components.
+\paragraph{Radial characterizations, Gaussian sums, and wave propagators.}
+Maxwell's kinetic-theory argument (1860) and Schoenberg's characterization of completely monotone radial functions~\cite{schoenberg1938metric} identify single Gaussians and positive Gaussian mixtures among radial kernels. For oscillatory or compactly supported radial kernels in scientific computing, Beylkin and Monz\'on~\cite{beylkin2005exponentials} approximate profiles and Green's functions by short sums of complex exponentials and Gaussians; in image filtering, Lampert and Wirjadi~\cite{lampert2006anisotropic} study anisotropic Gaussian separations, while Niemitalo~\cite{niemitalo2010blur,niemitalo2019lowpass,niemitalo_kernel_optimizer} fits circular defocus and low-pass profiles directly with complex-variance Gaussians. In numerical acoustics and seismic wave propagation, Kowalczyk and van~Walstijn~\cite{kowalczyk2011room} and Savioja and Svensson~\cite{savioja2015overview} analyze $27$-point compact explicit FDTD stencils to mitigate grid dispersion, while Fomel, Ying, and Song~\cite{fomel2013lowrank} approximate Fourier-domain wave-extrapolation symbols by low-rank separable expansions; Section~\ref{sec:acoustics} bridges these two approaches in physical space via certified von~Neumann-stable radial multi-Gaussian stencils. None of the prior works establishes a machine-checked converse for arbitrary signed finite-rank radial kernels or exact $d$-way real CP ranks across higher-degree components.
 
-\paragraph{Hankel operators, Waring rank, and real vs.\ complex tensor rank.}
-Reducing radial kernels via $s_j = x_j^2$ turns $K$ into the $d$-way additive Hankel kernel $\varphi(s_0 + \dots + s_{d-1})$. In two variables, Kronecker's theorem (1881) relates finite-rank discrete Hankel matrices to rational generating functions and linear recurrences; our continuous half-line version uses translation semigroups on $\mathcal{W}(\varphi)$ to avoid boundary cases and smoothness assumptions beyond continuity. In $d \ge 3$ variables, symmetric and Hankel tensor decompositions go back to Sylvester's apolarity theory (1851) and Comon and Mourrain~\cite{comon1996decomposition}; Landsberg~\cite{landsberg2012tensors} treats multilinear rank substitution (originating in Alder and Strassen~\cite{alder1981alg}) and the gap between border rank and exact rank, while Reznick~\cite{reznick2013length} and Qi, Comon, and Lim~\cite{qi2016semialgebraic} show that real symmetric/CP rank can strictly exceed complex rank. Our Theorems~\ref{thm:complex_nd} and~\ref{thm:real_nd} give exact closed-form complex and real $d$-way ranks for the entire continuous Hankel exponential-polynomial class, pinning down the exact real-over-complex gap $(\mathrm{cost}_{d,\R} - \mathrm{cost}_{d,\C} = d - 2$ for each nonreal conjugate pair, independent of polynomial degree!).
+\paragraph{Functional equations, Hankel operators, and real vs.\ complex tensor rank.}
+Reducing radial kernels via $s_j = x_j^2$ turns $K$ into the $d$-way additive Hankel kernel $\varphi(s_0 + \dots + s_{d-1})$. In two variables, functional equations of the form $f(x + y) = \sum_{n=1}^N X_n(x)Y_n(y)$ go back to Levi-Civita~\cite{levicivita1913}, Stone~\cite{stone1960}, Anselone and Korevaar's theorem on finite-dimensional translation-invariant subspaces~\cite{anselone1964}, and Laczkovich~\cite{laczkovich2020}, alongside Kronecker's theorem (1881) on finite-rank discrete Hankel matrices; our continuous half-line formalization uses operator-norm continuous shift semigroups on $\mathcal{W}(\varphi)$ to avoid differentiability hypotheses beyond continuity. In $d \ge 3$ variables, symmetric and Hankel tensor decompositions go back to Sylvester's apolarity theory (1851) and Comon and Mourrain~\cite{comon1996decomposition}; Kruskal~\cite{kruskal1977three} established generic essential uniqueness of minimal three-way CP decompositions, Landsberg~\cite{landsberg2012tensors} treats multilinear rank substitution (originating in Alder and Strassen~\cite{alder1981alg}) and border rank, while Reznick~\cite{reznick2013length} and Qi, Comon, and Lim~\cite{qi2016semialgebraic} show that real symmetric/CP rank can strictly exceed complex rank. Our Theorems~\ref{thm:complex_nd} and~\ref{thm:real_nd} give exact closed-form complex and real $d$-way ranks for the entire continuous Hankel exponential-polynomial class, pinning down the exact real-over-complex gap ($\mathrm{cost}_{d,\R} - \mathrm{cost}_{d,\C} = d - 2$ for each nonreal conjugate pair, independent of polynomial degree).
 
 \paragraph{Formalized analysis and nonstandard analysis.}
 Banach-space calculus, Bochner integration, and normed-algebra exponentials in Lean's Mathlib~\cite{mathlib2020} provide the infrastructure for \leanid{Semigroup.lean}, while Isabelle/HOL's multivariate analysis library~\cite{holzl2013type} and Fleuriot's formalization of nonstandard analysis~\cite{fleuriot2000mechanizing} (\texttt{HOL-Nonstandard\_Analysis}) underpin \leanid{Semigroup\_NSA.thy}. Section~\ref{sec:semigroup} provides a controlled side-by-side comparison of standard and nonstandard formalizations of the same theorem across both systems.
@@ -354,9 +355,11 @@ NSA (star + \texttt{transfer}) & Isabelle (\texttt{Semigroup\_NSA.thy}) & 275 & 
 
 Table~\ref{tab:semigroup} summarizes the exact line counts. These numbers reflect \emph{library amortization} rather than intrinsic proof complexity: \leanid{Semigroup.lean} ($96$ lines) is shortest and holds in every Banach algebra because Mathlib amortizes thousands of lines of Bochner integration, Neumann series, and the fundamental theorem of calculus behind compact API lemmas, whereas compactness-based proofs are inherently finite-dimensional. Across different proof styles within Lean, the $2\times$ gap between integral smoothing ($96$ lines) and ultrafilter sequences ($206$ lines) remained stable even after eliminating the $124$-line difference-quotient bound via homogeneous coordinates~\eqref{eq:eta}. Moreover, discounting the $195$-line interface \leanid{Ultrapower.lean} as reusable library code leaves $169 + 35 = 204$ lines: without automated transfer, nonstandard vocabulary in Lean merely wraps filter limits. In Isabelle/HOL, \texttt{transfer} genuinely compresses hypernatural induction, but $59$ lines of local library gaps (Heine--Borel vector standard parts and half-line continuity via $M(\max(t,0))$) plus stating transferred formulas at both standard and nonstandard types keep the total at $275$ lines.
 
-\section{Applications to Isotropic and Steerable Filtering and 3-D Propagation}\label{sec:applications}
+\section{Applications to 2-D Blur, Steerable Filtering, and 3-D Acoustic Propagation}\label{sec:applications}
 
-\subsection{Harmonic ``beach-ball'' differential operators and steerable kernels}
+All numerical optimizations, finite-precision simulations, and GPU benchmarks in Sections~\ref{sec:blur2d}--\ref{sec:acoustics} are implemented in reproducible scripts under \texttt{Applications/} and executed on an NVIDIA GeForce RTX~4070~Ti~Super ($16$\,GiB GDDR6X, $672$\,GB/s peak memory bandwidth). Before turning to specific designs, note an analytical duality linking spatial and frequency-domain radial kernels: for $\RePart\lambda < 0$, differentiating $\mathcal{F}_{\R^d}[e^{\lambda\|x\|^2}](\xi) = (\pi/(-\lambda))^{d/2} \exp(\|\xi\|^2/(4\lambda))$ $k$ times with respect to $\lambda$ maps $P(\|x\|^2)e^{\lambda\|x\|^2}$ ($\deg P = k$) to $\widetilde{P}(\|\xi\|^2)e^{\|\xi\|^2/(4\lambda)}$ with $\deg\widetilde{P} = k$ and $\RePart(1/(4\lambda)) < 0$. By Theorems~\ref{thm:complex_nd} and~\ref{thm:real_nd}, the $d$-dimensional Fourier transform preserves exact complex and real $d$-way separable rank across all integrable radial exponential-polynomial kernels.
+
+\subsection{Harmonic ``beach-ball'' differential operators and steerable kernels}\label{sec:steerable}
 
 Specializing Proposition~\ref{prop:roots} to equal symbolic factors $z_0 = \dots = z_{d-1} = \partial_x + i\partial_y$ (writing $m$ for the harmonic order and $D_\alpha = \cos\alpha\,\partial_x + \sin\alpha\,\partial_y$ for the directional derivative along angle $\alpha$) gives, for \emph{every} integer $m \ge 1$ (both odd and even),
 \begin{equation}\label{eq:beachball}
@@ -380,39 +383,105 @@ When $\varphi(s)$ is a well-formed multi-Gaussian profile with $r$ real and $c$ 
   \bigl(\lfloor m/2 \rfloor + 1\bigr)(r + 2c) \quad \text{for } \cos(m\theta), \qquad
   \lceil m/2 \rceil (r + 2c) \quad \text{for } \sin(m\theta).
 \]
-Sampling those 1-D factors on a finite grid yields a discrete separable realization with at most that many terms (grid aliasing at special rates such as $\ImPart\lambda_i \in \pi\mathbb{Z}$ can collapse the sampled discrete rank further).
+Sampling those 1-D factors on a finite grid yields a discrete separable realization with at most that many terms (grid aliasing at special rates such as $\ImPart\lambda_i \in \pi\mathbb{Z}$ can collapse the sampled discrete rank further). On the $161 \times 161$ ($\omega_c = \pi/64$) orientation-estimation filter of~\cite{niemitalo2019angle}, replacing direct $2 \times 161^2 = 51{,}842$ taps/pixel by a two-complex-Gaussian ($R = 4$) analytical gradient pair reduces scalar multiply--adds to $2{,}576$ ($20\times$, or $40\times$ with even/odd tap-parity folding).
 
 \paragraph{Continuous-domain pass-count bounds for simultaneous steerable pairs.}
-In applications such as orientation estimation~\cite{niemitalo2019angle}, one evaluates both continuous-domain convolutions $(C_m * I, S_m * I)$ of a harmonic pair simultaneously. Can sharing intermediate 1-D continuous convolutions reduce the pass count below separate evaluation $2(\lfloor m/2\rfloor + 1)R + 2\lceil m/2\rceil R = 2(m + 1)R$? No: if any two-stage 1-D schedule on $\R^2$ splits $(C_m, S_m) = (A_c + B_c, A_s + B_s)$ into $P_y$ shared vertical passes followed by $\operatorname{rank}(A_c) + \operatorname{rank}(A_s)$ horizontal passes plus $P_x$ shared horizontal passes followed by $\operatorname{rank}(B_c) + \operatorname{rank}(B_s)$ vertical passes, then
+Can sharing intermediate 1-D continuous convolutions reduce the simultaneous evaluation of $(C_m * I, S_m * I)$ below separate evaluation $2(\lfloor m/2\rfloor + 1)R + 2\lceil m/2\rceil R = 2(m + 1)R$? No: if any two-stage 1-D schedule on $\R^2$ splits $(C_m, S_m) = (A_c + B_c, A_s + B_s)$ into $P_y$ shared vertical passes followed by $\operatorname{rank}(A_c) + \operatorname{rank}(A_s)$ horizontal passes plus $P_x$ shared horizontal passes followed by $\operatorname{rank}(B_c) + \operatorname{rank}(B_s)$ vertical passes, then
 \begin{align*}
   \dim\operatorname{rowSpan}_x(C_m, S_m) &\le \operatorname{rank}(A_c) + \operatorname{rank}(A_s) + P_x,\\
   \dim\operatorname{colSpan}_y(C_m, S_m) &\le P_y + \operatorname{rank}(B_c) + \operatorname{rank}(B_s).
 \end{align*}
-Because $C_m$ and $S_m$ on $\R^2$ span all powers $\{x^0,\dots,x^m\}g_n(x)$ in $x$ and $\{y^0,\dots,y^m\}g_n(y)$ in $y$ (for $m = 1$, $h_x$ is odd-in-$x$/even-in-$y$ while $h_y$ is even-in-$x$/odd-in-$y$), adding the two inequalities proves that \emph{every} two-stage continuous 1-D schedule requires at least $(m+1)R + (m+1)R = 2(m+1)R$ passes ($4R$ passes for $(h_x, h_y)$). Savings instead arise in three ways: (i)~definite even/odd parity of every 1-D factor $u^k g_n(u)$ halves the multiplications per sampled pass via $I[y+\ell] \pm I[y-\ell]$ folding while fusing input loads; (ii)~across \emph{multiple} harmonic orders $m = 0,\dots,M$, vertical passes $\{I *_y (y^k g_n)\}_{k=0}^M$ are shared linearly ($5R$ passes instead of $6R$ for low-pass plus gradient; $10R$ instead of $12R$ for $m = 1$ plus $m = 3$); and (iii)~for the $d$-dimensional gradient $(h_{x_0},\dots,h_{x_{d-1}})$ of a multi-Gaussian radial kernel of $d$-way rank $R_d = r + d c$ ($d \ge 3$), recursively splitting $\{0,\dots,d-1\}$ into halves of sizes $\lfloor d/2\rfloor$ and $\lceil d/2\rceil$ and pre-convolving each half with the undifferentiated factors reduces $d^2 R_d$ passes to $T(d) R_d$ with $T(1) = 1$ and $T(d) = T(\lfloor d/2\rfloor) + T(\lceil d/2\rceil) + d \le d(\lceil \log_2 d \rceil + 1)$ ($8R_3$ vs.\ $9R_3$ in $d = 3$; $12R_4$ vs.\ $16R_4$ in $d = 4$).
+Because $C_m$ and $S_m$ on $\R^2$ span all powers $\{x^0,\dots,x^m\}g_n(x)$ in $x$ and $\{y^0,\dots,y^m\}g_n(y)$ in $y$, adding the two inequalities shows that \emph{every} two-stage continuous 1-D schedule requires at least $2(m+1)R$ passes ($4R$ passes for $(h_x, h_y)$). Savings instead come from: (i)~definite even/odd parity of every 1-D factor $u^k g_n(u)$, halving multiplications per sampled pass via $I[y+\ell] \pm I[y-\ell]$ folding; (ii)~sharing $\{I *_y (y^k g_n)\}_{k=0}^M$ across \emph{multiple} harmonic orders ($5R$ instead of $6R$ for $m = 0, 1$; $10R$ instead of $12R$ for $m = 1, 3$); and (iii)~for the $d$-D gradient $(h_{x_0},\dots,h_{x_{d-1}})$ of a multi-Gaussian radial kernel ($d \ge 3$), recursively splitting $\{0,\dots,d-1\}$ into halves to reduce $d^2 R_d$ passes to $T(d) R_d$ with $T(1) = 1$ and $T(d) = T(\lfloor d/2\rfloor) + T(\lceil d/2\rceil) + d \le d(\lceil \log_2 d \rceil + 1)$ ($8R_3$ vs.\ $9R_3$ in $d = 3$; $12R_4$ vs.\ $16R_4$ in $d = 4$).
 
-\subsection{Three-dimensional filtering, wave propagation, and concrete operation counts}
+\subsection{Worked application I: 2-D circular lens blur and \texorpdfstring{$\mathrm{GL}_N(\R)$}{GL\_N(R)} conditioning}\label{sec:blur2d}
 
-In three dimensions ($d = 3$), direct spatial convolution with an $L \times L \times L$ isotropic kernel---such as a cryo-EM/tomography bandpass filter or a coarse-grid dispersion-free time-step propagator for the band-limited constant-speed acoustic wave equation, whose spatial-frequency symbol depends radially on $\|\xi\|^2$---scales as $L^3$ per voxel. Approximating the radial profile by $r$ real and $c$ complex-conjugate Gaussians yields exact real 3-way separable rank $r + 3c$ by Theorem~\ref{thm:real_nd}: Proposition~\ref{prop:roots} realizes each complex Gaussian in $3$ real 3-way terms ($9$ real 1-D passes on real-valued volume buffers, vs.\ $2^{3-1} = 4$ terms / $12$ passes from naive real-and-imaginary expansion), and polynomial-oscillatory shells ($\deg P = 1$) take $7$ rather than $9$ real 3-way terms via Proposition~\ref{prop:poly_roots}.
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_blur_2d.pdf}
+\caption{Two-dimensional circular disc blur ($\tau = 0.2$, \texttt{Applications/blur\_2d.py}): (a)~minimax radial profiles $\varphi(r^2)$ against the unit disc; (b)~minimax pass/stopband ripple across exact 2-way real separable ranks $N \in [2, 12]$ for distinct complex Gaussians, odd-rank mixed Gaussians, and repeated-rate polynomial-Gaussians; (c)~maximum IEEE \texttt{float16} bokeh rendering error on a $512 \times 512$ HDR scene (peak $8.0$, radius $R_{\mathrm{px}} = 25$, tap width $W = 61$) before and after nuclear-norm-optimal $\mathrm{GL}_N(\R)$ rebalancing on $\operatorname{rowSpan}(K)$.}\label{fig:blur2d}
+\end{figure}
+
+In depth-of-field bokeh rendering~\cite{niemitalo2010blur,niemitalo_kernel_optimizer}, the ideal defocus point-spread function is the discontinuous unit disc $\mathbf{1}_{r \le 1}$ ($r = \sqrt{x^2 + y^2}$), which has infinite separable rank by Theorem~\ref{thm:classification}. Introducing a transition band $[1, S]$ with $S = 1 + \tau$ ($\tau = 0.2$) and truncating each 1-D pass to $|x|, |y| \le S$ restricts the 2-D separable support $[-S, S]^2$ to radii $r \le \sqrt{2}\,S \approx 1.697$. For any fixed choice of decay and oscillation rates $(b_u, c_u)$, minimizing the Chebyshev ripple $\max_{r \in [0, 1] \cup [S, \sqrt{2}S]} |\varphi(r^2) - \mathbf{1}_{r \le 1}|$ over all polynomial weights is a linear program (solved with HiGHS inside differential-evolution/Nelder--Mead rate search in \texttt{Applications/blur\_2d.py}).
 
 \begin{table}[t]
 \centering
-\caption{Comparison of exact continuous-domain real separable rank $R$, 1-D passes, and scalar multiply--adds per output sample ($d R L$) against direct spatial convolution ($L^d$) and naive real-part expansion at tap widths $L = 41$ and $L = 161$ (from~\cite{niemitalo2019angle}).}\label{tab:examples}
+\caption{Representative 2-D circular disc-blur designs ($\tau = 0.2$, $R_{\mathrm{px}} = 25$, $W = 61$). Exact 2-D rank $N$ and 3-D ball rank $R_3$ follow Theorem~\ref{thm:real_nd}; $\mathrm{SVD}$ is the empirical singular-value count ($\sigma_k > 10^{-10}\sigma_1$) of the $61 \times 61$ kernel; $\kappa_{\infty} = (\sum_n \|h_n\|_\infty \|v_n\|_\infty) / \|K\|_\infty$ measures peak channel amplification before ($\text{raw}$) and after ($\text{orth}$) $\operatorname{rowSpan}$ rebalancing, alongside max \texttt{float16} HDR bokeh error (in $8$-bit units $/255$).}\label{tab:blur2d}
 \smallskip
-{\footnotesize\setlength{\tabcolsep}{3.2pt}
-\begin{tabular}{@{}llrrrrr@{}}
+{\footnotesize\setlength{\tabcolsep}{4.0pt}
+\begin{tabular}{@{}llrrrrrrrr@{}}
 \toprule
-Kernel family & Params & Direct ($41 / 161$) & Naive & Exact $R$ & Passes & Ops ($41 / 161$) \\
+Structure & Degrees & $N$ ($d{=}2$) & $\mathrm{SVD}$ & $R_3$ ($d{=}3$) & Ripple $\pm\delta$ & $\kappa_\infty^{\mathrm{raw}}$ & $\kappa_\infty^{\mathrm{orth}}$ & \texttt{fp16} raw & \texttt{fp16} orth \\
 \midrule
-2-D circular low-pass $W$ & $d{=}2,\,c{=}2$ & $1{,}681$ / $25{,}921$ & $8$ & $4$ & $8$ & $328$ / $1{,}288$ \\
-2-D gradient $(h_x,h_y)$ & $d{=}2,\,m{=}1,\,c{=}2$ & $3{,}362$ / $51{,}842$ & $16$ & $4{+}4$ & $16$ & $656$ / $2{,}576$ \\
-2-D beach ball $(C_3,S_3)$ & $d{=}2,\,m{=}3,\,c{=}2$ & $3{,}362$ / $51{,}842$ & $32$ & $8{+}8$ & $32$ ($40^*$) & $1{,}312$ / $5{,}152$ \\
-3-D Gaussian prop. & $d{=}3,\,r{=}1,\,c{=}2$ & $68{,}921$ / $4.17{\times}10^6$ & $27$ & $7$ & $21$ & $861$ / $3{,}381$ \\
-3-D osc.\ shell ($\deg{=}1$) & $d{=}3,\,\deg{=}1,\,c{=}1$ & $68{,}921$ / $4.17{\times}10^6$ & $27$ & $7$ & $21$ & $861$ / $3{,}381$ \\
+$1c$ (Gaussian) & $0$ & $2$ & $2$ & $3$ & $0.2325$ & $1.65$ & $1.30$ & $0.14$ & $0.16$ \\
+$1c + 1r$ (mixed) & $0,0$ & $3$ & $3$ & $4$ & $0.1315$ & $3.45$ & $1.65$ & $0.15$ & $0.15$ \\
+$2c$ (Gaussians) & $0,0$ & $4$ & $4$ & $6$ & $0.0759$ & $5.28$ & $1.95$ & $0.27$ & $0.14$ \\
+$1c + 1r_2$ (mixed poly) & $0,1$ & $4$ & $4$ & $6$ & $0.0905$ & $4.50$ & $1.92$ & $0.20$ & $0.15$ \\
+$1c_2$ (complex poly) & $1$ & $4$ & $4$ & $7$ & $0.1165$ & $5.68$ & $1.88$ & $0.25$ & $0.17$ \\
+$1r_4$ (real Laguerre) & $3$ & $4$ & $4$ & $7$ & $0.1982$ & $4.74$ & $1.56$ & $0.31$ & $0.15$ \\
+$2c + 1r$ (mixed) & $0,0,0$ & $5$ & $5$ & $7$ & $0.0446$ & $8.73$ & $2.08$ & $0.25$ & $0.13$ \\
+$4c$ (Gaussians) & $0^4$ & $8$ & $8$ & $12$ & $0.0109$ & $70.06$ & $2.31$ & $1.03$ & $0.15$ \\
+$6c$ (Gaussians) & $0^6$ & $12$ & $12$ & $18$ & $0.0019$ & $595.01$ & $2.49$ & $4.44$ & $0.15$ \\
+$1c_6$ (complex poly) & $5$ & $12$ & $12$ & $23$ & $0.0138$ & $1{,}109.75$ & $2.32$ & $6.79$ & $0.16$ \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-Table~\ref{tab:examples} illustrates concrete operation counts (before an additional $2\times$ reduction in scalar multiplications from even/odd tap-parity folding; $40^*$ denotes the combined pass count for $m = 1$ plus $m = 3$, vs.\ $48$ unshared). On the $N = 161$ ($\omega_c = \pi/64$) orientation-estimation benchmark of~\cite{niemitalo2019angle}, replacing direct $2 \times 161^2$ spatial convolution by a two-complex-Gaussian analytical gradient pair reduces arithmetic by $20\times$ ($40\times$ with tap-parity folding) without full-image 2-D FFT buffers; in 3-D at $L = 41$, the $r + 3c = 7$ decomposition reduces $68{,}921$ taps/voxel to $861$ ($80\times$), saving $22\%$ over naive $1 + 4c = 9$ real/imaginary expansion.
+Figure~\ref{fig:blur2d} and Table~\ref{tab:blur2d} highlight three structural consequences of Theorem~\ref{thm:real_nd}:
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{Role of nonreal rates, odd budgets, and $3$-D lifting:} Across all $18$ tested families, empirical SVD rank matches $c.\mathrm{multiCost}(2)$ identically. Distinct complex Gaussians achieve geometric ripple decay with $N = 2c$ ($0.2325 \to 0.0019$ from $1c$ to $6c$, or $0.0014$ under global Remez search~\cite{niemitalo_kernel_optimizer}), while adding a single real Gaussian ($1c+1r, 2c+1r$) interpolates cleanly at odd ranks $N = 3, 5$. Free real-only rates coalesce into repeated-rate Laguerre--Gaussians ($1r_m$). At $N = 4$, four distinct structures tie in $2$-D cost, but lifting to a $3$-D spherical ball splits their exact $3$-way ranks: $2c$ gives both the lowest ripple ($\pm 0.0759$) and lower $3$-D rank ($R_3 = 6$ vs.\ $R_3 = 7$ for $1c_2$ and $1r_4$).
+  \item \textbf{Basis non-uniqueness in $d = 2$ vs.\ Kruskal uniqueness in $d \ge 3$:} While $N = \dim\operatorname{rowSpan}(K)$ is an algebraic invariant, any $T \in \mathrm{GL}_N(\R)$ maps $(h, v) \mapsto (Th, T^{-\top}v)$ to another rank-$N$ realization. Splitting high-order approximations component-by-component causes severe intermediate cancellation ($\kappa_\infty^{\mathrm{raw}} = 595$ on $6c$ and $1{,}110$ on $1c_6$), producing visible $4.44/255$ and $6.79/255$ errors around HDR specular highlights when intermediate passes are stored in IEEE \texttt{float16} (as in WebGPU \texttt{pack2x16float}~\cite{niemitalo_kernel_optimizer}). Orthonormalizing the $1$-D basis via QR and symmetric eigendecomposition $K(x,y) = \sum_{n=1}^N e_n g_n(x)g_n(y)$ ($\|g_n\|_2 = 1$, $h_n = \sqrt{|e_n|}g_n$, $v_n = \operatorname{sign}(e_n)h_n$, accumulated in ascending order of $|e_n|$) achieves the global nuclear-norm minimum $\sum_n \|h_n\|_2 \|v_n\|_2 = \sum_n |e_n| = \|K\|_{S_1}$, collapsing $\kappa_\infty$ to $\le 2.49$ and keeping \texttt{float16} max error at $0.13\text{--}0.17/255$ ($\mathrm{RMSE} \le 0.033/255$) across all $N \le 12$. By contrast, in $d \ge 3$, Kruskal's theorem~\cite{kruskal1977three} implies that minimal $d$-way CP decompositions have \emph{no} continuous $\mathrm{GL}_R(\R)$ rotation freedom (only permutation and scaling), making well-separated rates and amplitude-balanced root-of-unity factors essential.
+  \item \textbf{GPU throughput:} Using two-pass symmetric Triton kernels with constant two-buffer memory on $1920 \times 1080$ RGBA images at radius $R_{\mathrm{px}} = 64$ ($W = 155$), direct $155 \times 155$ depthwise \texttt{conv2d} takes $137.1$\,ms, whereas rank $N = 4, 8, 12$ takes $7.01, 14.17, 21.19$\,ms in \texttt{float32} ($19.6\times, 9.7\times, 6.5\times$) and $3.99, 8.05, 12.09$\,ms in \texttt{float16} ($34.3\times, 17.0\times, 11.3\times$).
+\end{enumerate}
+
+\subsection{Worked application II: isotropic 3-D acoustic wave simulation}\label{sec:acoustics}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_acoustics_3d.pdf}
+\caption{Three-dimensional acoustic wave propagation (\texttt{Applications/acoustics\_3d.py}): (a)~directional phase-velocity error $(c_{\mathrm{num}}(\mathbf{k})/c_0 - 1)$ along $(1,0,0)$, $(1,1,0)$, and $(1,1,1)$ across $\|\mathbf{k}\|_2/\pi \in [0, 0.86]$, with inset zoom ($\pm 0.10\%$ shaded) for $R = 6, 7$; (b)~broadband pulse waveforms ($\sigma_0 = 1.40\,\Delta x$) on a $256^3$ grid at the face-diagonal receiver $(34, 34, 0)$ ($r = 48.08\,\Delta x$) vs.\ the exact $3$-D D'Alembert solution; (c--e)~mid-plane wavefield slices $p(x, y, 0, t)$ at $c_0 t \approx 48\,\Delta x$ (dotted circle: $r = 48\,\Delta x$).}\label{fig:acoustics3d}
+\end{figure}
+
+Consider the $3$-D constant-speed scalar acoustic wave equation $\partial_{tt} p = c_0^2 \nabla^2 p$ discretized on $\mathbb{Z}^3$ with spacing $\Delta x$ and time step $\Delta t = \nu \Delta x / c_0$ (Courant number $\nu > 0$) by the explicit two-step leapfrog update
+\begin{equation}\label{eq:leapfrog}
+  p^{n+1}[\mathbf{m}] + p^{n-1}[\mathbf{m}] = (M * p^n)[\mathbf{m}], \qquad \mathbf{m} \in \mathbb{Z}^3.
+\end{equation}
+In discrete wavenumber $\mathbf{k} = (k_x, k_y, k_z) \in [-\pi, \pi]^3$, the exact continuous wave-equation propagator has radial symbol $\widehat{M}_{\mathrm{exact}}(\mathbf{k}) = 2\cos(\nu \|\mathbf{k}\|_2)$, and~\eqref{eq:leapfrog} is von~Neumann stable and energy-conserving on $\ell^2(\mathbb{Z}^3)$ if and only if $\widehat{M}(\mathbf{k}) \in [-2, 2]$ for all $\mathbf{k} \in [-\pi, \pi]^3$ (both characteristic roots of $\zeta^2 - \widehat{M}(\mathbf{k})\zeta + 1 = 0$ then lie on $|\zeta| = 1$). Standard $7$-point FDTD ($\nu \le 1/\sqrt{3}$) suffers up to $19.7\%$ axial phase-velocity error by $\|\mathbf{k}\|_2 = 0.80\pi$. Two structural facts explain why radial multi-Gaussians are natural here:
+\begin{itemize}[leftmargin=1.6em,itemsep=2pt]
+  \item \textbf{Inadequacy of additive axial stencils of any order:} Any purely axial scheme $\widehat{M}_{\mathrm{ax}}(\mathbf{k}) = 2 + A(k_x) + A(k_y) + A(k_z)$ ($A(0) = 0$) lacks mixed cross-terms $k_x^2 k_y^2$: even if $A(k) = 2(\cos(\nu k) - 1)$ has zero dispersion along the coordinate axes, along $(1,1,1)/\sqrt{3}$ it gives $2 + 6(\cos(\nu k/\sqrt{3}) - 1) = 2 - \nu^2 k^2 + \frac{1}{36}\nu^4 k^4 - \dots \ne 2\cos(\nu k) = 2 - \nu^2 k^2 + \frac{1}{12}\nu^4 k^4 - \dots$, leaving an irreducible $O(\nu^4 k^4)$ anisotropy gap while Brillouin-corner stability $\widehat{M}_{\mathrm{ax}}(\pi,\pi,\pi) \ge -2$ forces $A(\pi) \ge -4/3$ ($\nu k_c \le \arccos(1/3) \approx 0.392\pi$ when $A$ tracks $2(\cos(\nu k) - 1)$).
+  \item \textbf{Kowalczyk--van~Walstijn IWB is a single real Gaussian:} In room acoustics, Kowalczyk and van~Walstijn's $27$-point Interpolated Wideband (\texttt{IWB}) stencil~\cite{kowalczyk2011room} ($a = \frac{1}{4}, b = \frac{1}{16}$, $\nu \le 1$) has face, edge, and corner weights $\frac{1}{4}\nu^2, \frac{1}{8}\nu^2, \frac{1}{16}\nu^2$ and center weight $2 - \frac{7}{2}\nu^2$, which is \emph{identically}
+  \[
+    M_{\mathrm{IWB}}[\mathbf{m}] = (2 - 4\nu^2)\delta_{\mathbf{0}}[\mathbf{m}] + \frac{\nu^2}{2}\, 2^{-(m_x^2 + m_y^2 + m_z^2)} \qquad (\mathbf{m} \in \{-1,0,1\}^3),
+  \]
+  the $(r = 1, c = 0, L = 1, R = 1)$ single-real-Gaussian member of our radial family (plus a zero-pass center tap). Because a single positive real Gaussian cannot match higher radial derivatives of $2\cos(\nu\|\mathbf{k}\|_2)$, \texttt{IWB} at $\nu = 1$ is exact on axes but incurs $9.23\%$ diagonal phase-velocity error by $0.80\pi$ (Figure~\ref{fig:acoustics3d}a,d).
+\end{itemize}
+
+\paragraph{Certified Brillouin-octant minimax design and exact Neumann walls.}
+Generalizing \texttt{IWB} to wider stencils $\mathbf{m} \in [-L, L]^3$, we set $M[\mathbf{m}] = \alpha_0\delta_{\mathbf{0}}[\mathbf{m}] + \varphi(m_x^2 + m_y^2 + m_z^2)$, where $\alpha_0$ fixes $\widehat{M}(\mathbf{0}) = 2$ identically and $\varphi$ has exact $3$-way real rank $R = r + 3c$ (Proposition~\ref{prop:roots}) or $R = 7$ for $\deg P = 1$ (Proposition~\ref{prop:poly_roots}; verified to $\le 5.6 \times 10^{-16}$ on $[-L, L]^3$). For fixed rates, minimizing $\max_{0 < \|\mathbf{k}\|_2 \le k_c} |\widehat{M}(\mathbf{k}) - 2\cos(\nu\|\mathbf{k}\|_2)| / (2\nu\|\mathbf{k}\|_2\sin(\nu\|\mathbf{k}\|_2))$ subject to exact asymptotic sound speed $\partial_{k_x}^2\widehat{M}(\mathbf{0}) = -2\nu^2$ and strict von~Neumann stability $-2 + 10^{-3} \le \widehat{M}(\mathbf{k}) \le 2 - \min(10^{-3}, \frac{1}{4}\nu^2\|\mathbf{k}\|_2^2)$ over all $47{,}904$ symmetry-inequivalent nonzero points of a $65^3$ grid on $[0,\pi]^3$ is solved via cutting-plane HiGHS linear programming. Moreover, because every 1-D radial factor $h[m] = h[-m]$ is even, half-sample symmetric index reflection at domain boundaries simultaneously diagonalizes all $3R$ 1-D passes in the 3-D \texttt{DCT-II} cosine basis---enforcing exact rigid-wall Neumann boundary conditions ($\partial_n p = 0$) without padding buffers or boundary instabilities. Across $1{,}000$ steps ($> 18$ wall reflections) in a $64^3$ rigid enclosure, discrete leapfrog energy drifted by at most $1.1 \times 10^{-6}$ (\texttt{float32} rounding).
+
+\begin{table}[t]
+\centering
+\caption{Certified $3$-D acoustic propagators vs.\ FDTD baselines on $256^3$ voxels (RTX~4070~Ti~Super). Here $|\delta c/c_0|$ is the worst-case phase-velocity error up to $k_c$ ($0.80\pi$ for baselines); $k_{0.1\%}$ and $k_{0.5\%}$ are the largest isotropic cutoffs (in units of $\pi$) keeping $|\delta c/c_0| \le 0.1\%$ and $0.5\%$ over all $3$-D angles; $\text{Wave } L^2$ is the worst-case receiver relative $L^2$ waveform error at $r \approx 48\,\Delta x$; GPU step times compare direct $W^3$ \texttt{conv3d}, naive $(r+4c)$/$9$-term Triton passes, and exact $R$-term Triton passes in \texttt{fp32} and \texttt{fp16}-intermediate precision.}\label{tab:acoustics3d}
+\smallskip
+{\scriptsize\setlength{\tabcolsep}{2.3pt}
+\begin{tabular}{@{}llrrrrrrrrrr@{}}
+\toprule
+Scheme & $\nu$ & $W$ & $R$ (nv) & $|\delta c/c_0|$ & $k_{0.1\%}$ & $k_{0.5\%}$ & Wave $L^2$ & Direct & Naive & Exact \texttt{fp32} & Exact \texttt{fp16} \\
+\midrule
+$7$-pt FDTD & $0.58$ & $3$ & --- & $19.71\%$ & $0.062\pi$ & $0.141\pi$ & $109.3\%$ & --- & --- & $0.323$\,ms & --- \\
+$13$-pt $O(\Delta x^4,\Delta t^2)$ & $0.50$ & $5$ & --- & $8.59\%$ & $0.100\pi$ & $0.224\pi$ & --- & --- & --- & --- & --- \\
+$27$-pt IWB ($1r$) & $1.00$ & $3$ & $1$ ($1$) & $9.23\%$ & $0.091\pi$ & $0.199\pi$ & $98.2\%$ & --- & --- & $0.323$\,ms & --- \\
+\midrule
+Rank-$4$ ($1c{+}1r, 0.75\pi$) & $0.75$ & $9$ & $4$ ($5$) & $0.316\%$ & $0.14\pi$ & $0.77\pi$ & $11.9\%$ & $76.8$\,ms & $4.04$\,ms & $3.30$\,ms & $2.39$\,ms \\
+Rank-$6$ ($2c, 0.75\pi$) & $0.75$ & $11$ & $6$ ($8$) & $0.070\%$ & $0.76\pi$ & $0.81\pi$ & $5.2\%$ & $139.3$\,ms & $6.29$\,ms & $4.80$\,ms & $3.44$\,ms \\
+Rank-$7$ ($\deg 1\,1c, 0.75\pi$) & $0.75$ & $13$ & $7$ ($9$) & $0.148\%$ & $0.15\pi$ & $0.80\pi$ & $6.7\%$ & $230.5$\,ms & $7.09$\,ms & $5.59$\,ms & $4.02$\,ms \\
+Rank-$7$ ($2c{+}1r, 0.80\pi$) & $0.75$ & $13$ & $7$ ($9$) & $0.082\%$ & $0.81\pi$ & $0.84\pi$ & $4.0\%$ & $230.5$\,ms & $7.09$\,ms & $5.59$\,ms & $4.02$\,ms \\
+Rank-$7$ ($2c{+}1r, 0.80\pi$) & $1.00$ & $13$ & $7$ ($9$) & $0.055\%$ & $0.82\pi$ & $0.87\pi$ & $2.4\%$ & $230.5$\,ms & $7.09$\,ms & $5.59$\,ms & $4.02$\,ms \\
+Rank-$9$ ($3c, 0.85\pi$) & $0.75$ & $17$ & $9$ ($12$) & $0.061\%$ & $0.86\pi$ & $0.89\pi$ & $2.7\%$ & $104.7^*$\,ms & $10.01$\,ms & $7.66$\,ms & $5.43$\,ms \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Table~\ref{tab:acoustics3d} and Figure~\ref{fig:acoustics3d} summarize accuracy and GPU performance ($^*$at $W = 17$, cuDNN switches \texttt{conv3d} to an FFT algorithm, which the local $R = 9$ Triton cascade still outperforms by $13.7\times$--$19.3\times$). Both dedicated $1$-pass baselines ($7$-pt FDTD and $27$-pt IWB) run at $0.323$\,ms/step ($51.9$\,GVox/s, $92\%$ of peak GDDR6X memory bandwidth). On the $256^3$ broadband spherical pulse test ($\sigma_0 = 1.40\,\Delta x$), $7$-pt FDTD and $27$-pt IWB break into anisotropic dispersive wave trains ($109.3\%$ and $98.2\%$ waveform error), whereas \texttt{Rank-7} ($2c+1r, \nu = 1.00$) keeps $|\delta c/c_0| \le 0.055\%$ ($< 1$\,cent) up to $0.80\pi$ ($2.44$ points per wavelength at $k_{0.1\%} = 0.82\pi$), achieving $2.0\%$--$2.4\%$ broadband waveform error across all axes and diagonals (and $4.1\%$ vs.\ $4.0\%$ with \texttt{float16} intermediates at $\nu = 0.75$, since the LP weights satisfy $\|w\|_1 \le 1.51$ without cancellation). Replacing naive $(r + 4c) = 9$ expansion by Proposition~\ref{prop:roots}'s exact $R = 7$ formula saves $21.2\%$ wall-clock time ($5.59$\,ms vs.\ $7.09$\,ms, $41.3\times$ faster than direct $13^3$). Most importantly, because $3$-D grid cost scales as $(\Delta x)^{-3}(\Delta t)^{-1} \propto k_{\mathrm{tol}}^{-4}$, matching \texttt{Rank-7}'s $0.1\%$-accurate bandwidth ($0.82\pi$ vs.\ $0.091\pi$ for $27$-pt IWB at $\nu = 1$) requires a $9.01\times$ finer grid per axis in $27$-pt IWB---consuming $731\times$ more GPU memory and $6{,}590\times$ more voxel-steps, making \texttt{Rank-7} $381\times$ faster in \texttt{float32} ($529\times$ in \texttt{fp16}-intermediate) than hardware-roofline $27$-pt IWB at equal dispersion accuracy ($21\times$--$29\times$ faster and $83\times$ leaner even at a $0.5\%$ tolerance).
 
 \section{Formalization Architecture and Verification Audit}\label{sec:formalization}
 
@@ -464,6 +533,11 @@ A.~Alder and V.~Strassen,
 ``On the algorithmic complexity of associative algebras,''
 \emph{Theoretical Computer Science} \textbf{15}(2), 201--211 (1981).
 
+\bibitem{anselone1964}
+P.~M.~Anselone and J.~Korevaar,
+``Translation invariant subspaces of finite dimension,''
+\emph{Proceedings of the American Mathematical Society} \textbf{15}(5), 747--752 (1964).
+
 \bibitem{beylkin2005exponentials}
 G.~Beylkin and L.~Monz\'on,
 ``On approximation of functions by exponential sums,''
@@ -478,6 +552,11 @@ P.~Comon and B.~Mourrain,
 J.~D.~Fleuriot,
 ``On the mechanization of real analysis in Isabelle/HOL,''
 in \emph{Theorem Proving in Higher Order Logics (TPHOLs 2000)}, LNCS \textbf{1869}, pp.~145--161 (2000).
+
+\bibitem{fomel2013lowrank}
+S.~Fomel, L.~Ying, and X.~Song,
+``Seismic wave extrapolation using lowrank symbol approximation,''
+\emph{Geophysical Prospecting} \textbf{61}(3), 526--536 (2013).
 
 \bibitem{freeman1991steerable}
 W.~T.~Freeman and E.~H.~Adelson,
@@ -494,6 +573,21 @@ J.~J.~Koenderink and A.~J.~van~Doorn,
 ``Generic neighborhood operators,''
 \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence} \textbf{14}(6), 597--605 (1992).
 
+\bibitem{kowalczyk2011room}
+K.~Kowalczyk and M.~van~Walstijn,
+``Room acoustics simulation using 3-D compact explicit FDTD schemes,''
+\emph{IEEE Transactions on Audio, Speech, and Language Processing} \textbf{19}(1), 34--46 (2011).
+
+\bibitem{kruskal1977three}
+J.~B.~Kruskal,
+``Three-way arrays: rank and uniqueness of trilinear decompositions, with application to arithmetic complexity and statistics,''
+\emph{Linear Algebra and its Applications} \textbf{18}(2), 95--138 (1977).
+
+\bibitem{laczkovich2020}
+M.~Laczkovich,
+``The Levi-Civita equation in function classes,''
+\emph{Aequationes Mathematicae} \textbf{94}(4), 689--701 (2020).
+
 \bibitem{lampert2006anisotropic}
 C.~H.~Lampert and O.~Wirjadi,
 ``An optimal nonorthogonal separation of the anisotropic Gaussian convolution filter,''
@@ -504,10 +598,21 @@ J.~M.~Landsberg,
 \emph{Tensors: Geometry and Applications},
 Graduate Studies in Mathematics \textbf{128}, American Mathematical Society (2012).
 
+\bibitem{levicivita1913}
+T.~Levi-Civita,
+``Sulle funzioni che ammettono una formula d'addizione del tipo $f(x+y)=\sum_{i=1}^n X_i(x)Y_i(y)$,''
+\emph{Rendiconti della Reale Accademia dei Lincei} (5) \textbf{22}, 181--183 (1913).
+
 \bibitem{mathlib2020}
 The mathlib Community,
 ``The Lean mathematical library,''
 in \emph{Proceedings of the 9th ACM SIGPLAN International Conference on Certified Programs and Proofs (CPP 2020)}, pp.~367--381 (2020).
+
+\bibitem{niemitalo2010blur}
+O.~Niemitalo,
+``Circularly symmetric convolution and lens blur,''
+technical blog post (2010),
+\url{https://yehar.com/blog/?p=1495}.
 
 \bibitem{niemitalo2019angle}
 O.~Niemitalo,
@@ -530,7 +635,7 @@ O.~Niemitalo,
 \bibitem{niemitalo_kernel_optimizer}
 O.~Niemitalo,
 \emph{kernel-optimizer: Circularly symmetric 2-D blur kernel approximation by complex Gaussians},
-GitHub repository, \url{https://github.com/OlliNiemitalo/kernel-optimizer}.
+GitHub repository and interactive WebGPU app, \url{https://github.com/OlliNiemitalo/kernel-optimizer} (\url{https://yehar.com/kernel-optimizer/}).
 
 \bibitem{perona1995deformable}
 P.~Perona,
@@ -545,12 +650,22 @@ Y.~Qi, P.~Comon, and L.-H.~Lim,
 \bibitem{reznick2013length}
 B.~Reznick,
 ``On the length of binary forms,''
-in \emph{ Quadratic and Higher Degree Forms}, Developments in Mathematics \textbf{31}, pp.~207--232 (2013).
+in \emph{Quadratic and Higher Degree Forms}, Developments in Mathematics \textbf{31}, pp.~207--232 (2013).
+
+\bibitem{savioja2015overview}
+L.~Savioja and U.~P.~Svensson,
+``Overview of geometrical room acoustic modeling techniques,''
+\emph{Journal of the Acoustical Society of America} \textbf{138}(2), 708--730 (2015).
 
 \bibitem{schoenberg1938metric}
 I.~J.~Schoenberg,
 ``Metric spaces and completely monotone functions,''
 \emph{Annals of Mathematics} \textbf{39}(4), 811--841 (1938).
+
+\bibitem{stone1960}
+J.~J.~Stone,
+\emph{Exponential Polynomials on Commutative Semigroups},
+Applied Mathematics and Statistics Laboratories Technical Note~14, Stanford University (1960).
 
 \bibitem{unser2013steerable}
 M.~Unser and N.~Chenouard,
