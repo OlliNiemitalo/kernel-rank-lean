@@ -13,11 +13,11 @@ open Polynomial NNReal
 
 namespace KernelRank
 
-/-- The least differential-annihilator order is the radial kernel's separable rank. -/
+/-- The least differential-annihilator order is the 2-D radial kernel's separable rank. -/
 theorem exists_minimal_differential_annihilator (φ : ℝ → ℝ)
     [FiniteDimensional ℝ (translateSpan φ)] (hφ : ContinuousOn φ (Set.Ici 0)) :
     ∃ p : ℂ[X], p.Monic ∧
-      separableRank (fun x y => φ (x ^ 2 + y ^ 2)) = p.natDegree ∧
+      separableRank (fun x : Fin 2 → ℝ => φ (∑ i, x i ^ 2)) = p.natDegree ∧
       ∀ q : ℂ[X],
         (∀ t, 0 ≤ t → differentialOperator q (fun s => (φ s : ℂ)) t = 0) ↔ p ∣ q := by
   classical
@@ -46,7 +46,7 @@ theorem exists_minimal_differential_annihilator (φ : ℝ → ℝ)
     exact heq (add_nonneg u.2 t.2)
   obtain ⟨_, hrank⟩ := finrank_translateSpan_sum_expPoly Subtype.coe_injective P hP
   refine ⟨expPolyAnnihilator P rate, expPolyAnnihilator_monic P rate, ?_, fun q => ?_⟩
-  · rw [separableRank_radial_eq_finrank, ← finrank_translateSpan_ofReal φ,
+  · rw [separableRank_radial_two_eq_finrank, ← finrank_translateSpan_ofReal φ,
       hspan, hrank, expPolyAnnihilator_natDegree]
   · have h := differentialOperator_sum_expPoly_eq_zero_iff P rate Subtype.coe_injective hP q
     constructor
@@ -56,12 +56,12 @@ theorem exists_minimal_differential_annihilator (φ : ℝ → ℝ)
     · intro hq t ht
       exact (differentialOperator_congr q heq ht).trans (h.mpr hq t ht)
 
-/-- No nonzero constant-coefficient annihilator has order below the radial kernel's rank. -/
+/-- No nonzero constant-coefficient annihilator has order below the 2-D radial kernel's rank. -/
 theorem separableRank_radial_le_natDegree_of_annihilator (φ : ℝ → ℝ)
     [FiniteDimensional ℝ (translateSpan φ)]
     (hφ : ContinuousOn φ (Set.Ici 0)) {q : ℂ[X]} (hq : q ≠ 0)
     (hann : ∀ t, 0 ≤ t → differentialOperator q (fun s => (φ s : ℂ)) t = 0) :
-    separableRank (fun x y => φ (x ^ 2 + y ^ 2)) ≤ q.natDegree := by
+    separableRank (fun x : Fin 2 → ℝ => φ (∑ i, x i ^ 2)) ≤ q.natDegree := by
   obtain ⟨p, _, hrank, hp⟩ := exists_minimal_differential_annihilator φ hφ
   rw [hrank]
   exact_mod_cast natDegree_le_of_dvd ((hp q).mp hann) hq

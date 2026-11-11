@@ -93,17 +93,21 @@ theorem finrank_translateSpan_familyProfile {ι : Type*} [Fintype ι] {comp : ι
   have hcomplex : (fun t => (familyProfile comp t : ℂ)) =
       fun t => ∑ j, expPoly (P j) (ν j) t := funext hprof
   rw [← hcomplex] at hfin hdim
-  let : FiniteDimensional ℂ
-      (rowSpan (fun u t : ℝ≥0 => (familyProfile comp (u + t) : ℂ))) := hfin
-  refine ⟨finiteDimensional_rowSpan_ofReal
-    (fun u t : ℝ≥0 => familyProfile comp (u + t)), ?_⟩
-  exact (finrank_rowSpan_ofReal (fun u t : ℝ≥0 => familyProfile comp (u + t))).trans
-    (hdim.trans hcost)
+  let K (s : Fin 2 → ℝ≥0) := familyProfile comp (∑ i, (s i : ℝ))
+  have hKR : rowSpan K = translateSpan (familyProfile comp) :=
+    rowSpan_hankelTwo (familyProfile comp)
+  have hKC : rowSpan (fun s => (K s : ℂ)) =
+      translateSpan (fun t => (familyProfile comp t : ℂ)) :=
+    rowSpan_hankelTwo (fun t => (familyProfile comp t : ℂ))
+  let : FiniteDimensional ℂ (rowSpan (fun s => (K s : ℂ))) := hKC.symm ▸ hfin
+  refine ⟨hKR ▸ finiteDimensional_rowSpan_ofReal K, ?_⟩
+  rw [← hKR]
+  exact (finrank_rowSpan_ofReal K).trans (hKC.symm ▸ hdim |>.trans hcost)
 
-/-- **Sufficiency.** The profile of a representation gives a radial kernel whose separable rank
-is the representation's total cost. -/
-theorem separableRank_radial_profile {cs : List Component} (hcs : IsRepresentation cs) :
-    separableRank (fun x y => profile cs (x ^ 2 + y ^ 2)) = totalCost cs := by
+/-- **2-D Sufficiency.** The profile of a representation gives a 2-D radial kernel whose
+separable rank is the representation's total cost. -/
+theorem separableRank_radial_two_profile {cs : List Component} (hcs : IsRepresentation cs) :
+    separableRank (fun x : Fin 2 → ℝ => profile cs (∑ i, x i ^ 2)) = totalCost cs := by
   let comp : Fin cs.length → Component := fun i => cs[i]
   have hinj : Function.Injective fun i => (comp i).rate := by
     intro i j hij
@@ -118,6 +122,6 @@ theorem separableRank_radial_profile {cs : List Component} (hcs : IsRepresentati
     (Fin.sum_univ_fun_getElem cs Component.cost).symm
   obtain ⟨hfin, hrank⟩ := finrank_translateSpan_familyProfile hinj hwf
   rw [hφ, hcost, ← hrank]
-  exact separableRank_radial_eq_finrank _
+  exact separableRank_radial_two_eq_finrank _
 
 end KernelRank

@@ -225,15 +225,4 @@ theorem finrank_translateSpan_sum_expPoly {ι : Type*} [Fintype ι] {rate : ι �
     exact natDegree_le_of_dvd
       ((differentialOperator_sum_expPoly_eq_zero_iff P rate hinj hP q).mp hann) hq.ne_zero
 
-/-- Exact separable rank of the Hankel kernel of a complex exponential polynomial. -/
-theorem separableRank_sum_expPoly {ι : Type*} [Fintype ι] {rate : ι → ℂ}
-    (hinj : Function.Injective rate) (P : ι → ℂ[X]) (hP : ∀ i, P i ≠ 0) :
-    separableRank (fun s t : ℝ≥0 => ∑ i, expPoly (P i) (rate i) (s + t)) =
-      (∑ i, ((P i).natDegree + 1) : ℕ) := by
-  obtain ⟨hfin, hdim⟩ := finrank_translateSpan_sum_expPoly hinj P hP
-  let : FiniteDimensional ℂ
-      (rowSpan (fun s t : ℝ≥0 => ∑ i, expPoly (P i) (rate i) (s + t))) := hfin
-  rw [separableRank_eq_finrank_rowSpan]
-  exact_mod_cast hdim
-
 end KernelRank

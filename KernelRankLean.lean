@@ -10,4 +10,6 @@ import KernelRankLean.Sufficiency
 import KernelRankLean.TranslationSemigroup
 import KernelRankLean.Necessity
 import KernelRankLean.Annihilator
+import KernelRankLean.MultiComplexRank
+import KernelRankLean.MultiGaussian
 import KernelRankLean.Main

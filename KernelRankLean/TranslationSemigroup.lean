@@ -50,9 +50,12 @@ noncomputable def initialProfile : translateSpan φ := ⟨_, translate_mem_trans
 lemma finiteDimensional_translateSpan_ofReal (φ : ℝ → ℝ)
     [FiniteDimensional ℝ (translateSpan φ)] :
     FiniteDimensional ℂ (translateSpan (fun t => (φ t : ℂ))) := by
-  let K (u t : ℝ≥0) := φ (u + t)
-  let : FiniteDimensional ℝ (rowSpan K) :=
-    inferInstanceAs (FiniteDimensional ℝ (translateSpan φ))
+  let K (s : Fin 2 → ℝ≥0) := φ (∑ i, (s i : ℝ))
+  have hKR : rowSpan K = translateSpan φ := rowSpan_hankelTwo φ
+  have hKC : rowSpan (fun s => (K s : ℂ)) = translateSpan (fun t => (φ t : ℂ)) :=
+    rowSpan_hankelTwo (fun t => (φ t : ℂ))
+  let : FiniteDimensional ℝ (rowSpan K) := hKR.symm ▸ inferInstance
+  rw [← hKC]
   exact finiteDimensional_rowSpan_of_isSumOfProducts
     (isSumOfProducts_finrank_rowSpan K).ofReal
 
@@ -61,11 +64,13 @@ lemma finrank_translateSpan_ofReal (φ : ℝ → ℝ)
     Module.finrank ℂ (translateSpan (fun t => (φ t : ℂ))) =
       Module.finrank ℝ (translateSpan φ) := by
   let := finiteDimensional_translateSpan_ofReal φ
-  let : FiniteDimensional ℝ (rowSpan (fun u t : ℝ≥0 => φ (u + t))) :=
-    inferInstanceAs (FiniteDimensional ℝ (translateSpan φ))
-  let : FiniteDimensional ℂ (rowSpan (fun u t : ℝ≥0 => (φ (u + t) : ℂ))) :=
-    inferInstanceAs (FiniteDimensional ℂ (translateSpan (fun t => (φ t : ℂ))))
-  exact (finrank_rowSpan_ofReal (fun u t : ℝ≥0 => φ (u + t))).symm
+  let K (s : Fin 2 → ℝ≥0) := φ (∑ i, (s i : ℝ))
+  have hKR : rowSpan K = translateSpan φ := rowSpan_hankelTwo φ
+  have hKC : rowSpan (fun s => (K s : ℂ)) = translateSpan (fun t => (φ t : ℂ)) :=
+    rowSpan_hankelTwo (fun t => (φ t : ℂ))
+  let : FiniteDimensional ℂ (rowSpan (fun s => (K s : ℂ))) := hKC.symm ▸ inferInstance
+  rw [← hKR, ← hKC]
+  exact (finrank_rowSpan_ofReal K).symm
 
 section Complex
 

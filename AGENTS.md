@@ -2,8 +2,10 @@
 
 ## Repository layout
 
-- `KernelRankLean/` and `KernelRankLean.lean`: the proof of the separable-rank theorem for
-  circularly symmetric kernels (`KernelRank.separableRank_radial_eq_iff` in `Main.lean`). It
+- `KernelRankLean/` and `KernelRankLean.lean`: the proof of the `d`-dimensional and 2-D
+  separable-rank theorems for circularly symmetric kernels (`separableRank_radial_lt_top_iff_exists`,
+  `separableRank_radial_complex_eq_iff`, `separableRank_radial_gaussian_profile`,
+  `separableRank_radial_gaussian_eq_iff`, and `separableRank_radial_eq_iff` in `Main.lean`). It
   must stay free of `sorry`; its axioms are only `propext`, `Classical.choice`, `Quot.sound`.
 - `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step, none used
   by the main proof and all free of `sorry`: finite differences (`GeneratorBound.lean`,
@@ -93,17 +95,35 @@
 
 ## Mathematics of the current proof
 
-- Rank of `φ(x² + y²)` equals rank of the Hankel kernel `φ(s + t)` on `[0, ∞)²`, which equals
-  the dimension of the span of the translates of `φ` (`RowSpan`, `Translations`).
-- Complexification preserves the rank of real-valued kernels, including infinite rank
-  (`Complexification`).
-- Necessity: translation on the finite-dimensional complex translate space is a continuous
-  semigroup, hence `exp (t A)` (`Semigroup`, by integral smoothing; `TranslationSemigroup`);
-  generalized eigenvectors give exponential polynomials (`Necessity`).
-- Exact complex rank (`ComplexRank`): Taylor expansion gives the upper bound; the product
-  annihilator `∏ (X - μᵢ)^(deg Pᵢ + 1)` divides the Cayley–Hamilton annihilator of the
-  generator, giving the lower bound. Hasse-derivative independence is still used.
-- Real sufficiency expands nonreal components into conjugate pairs (`Sufficiency`).
+- `Defs.lean` defines multi-way `IsSumOfProducts` and `separableRank` for `K : (∀ i, X i) → 𝕜`
+  (`[Fintype ι]`). Coordinatewise surjections preserve `separableRank`, so the `d`-D radial
+  kernel `x ↦ φ (∑ j, x j ^ 2)` on `Fin d → ℝ` has the same rank as the `d`-D Hankel kernel
+  `s ↦ φ (∑ j, s j)` on `Fin d → ℝ≥0` (`separableRank_radial_eq_hankel`), and padding `Fin 2`
+  with zeros bounds the 2-D rank by the `d`-D rank for `d ≥ 2` (`separableRank_radial_two_le`).
+- In two coordinates (`Fin 2 → α`), rank equals the dimension of `rowSpan`, which for the 2-D
+  Hankel kernel is `translateSpan φ` (`RowSpan`, `Translations`). Complexification bounds
+  multi-way rank in all dimensions (`separableRank_ofReal_le`) and preserves two-coordinate
+  rank exactly, including infinite rank (`Complexification`); for `d ≥ 3` a single nonreal
+  Gaussian has complex rank `2` and real rank `d`.
+- Necessity (`d ≥ 2`): restricting to 2-D gives finite-dimensional `translateSpan`; translation
+  on the complex translate space is a continuous semigroup, hence `exp (t A)` (`Semigroup`, by
+  integral smoothing; `TranslationSemigroup`); generalized eigenvectors give exponential
+  polynomials (`Necessity`).
+- 2-D exact rank (`ComplexRank`, `Sufficiency`): Taylor expansion gives the upper bound; the
+  product annihilator `∏ (X - μᵢ)^(deg Pᵢ + 1)` divides the Cayley–Hamilton annihilator of the
+  generator, giving the lower bound; real 2-D sufficiency expands nonreal components into
+  conjugate pairs.
+- Exact `d`-D complex exponential-polynomial rank (`MultiComplexRank`, `d ≥ 2`): root-of-unity
+  interpolation on `ℂ[T] / (T^(m + 1))` splits `P(∑ j, s_j) exp(λ ∑ j, s_j)` into
+  `(d - 1) deg P + 1` products; flattened matricization (`j = 0` vs `j > 0`) for single blocks
+  plus Alder–Strassen substitution across rates gives the matching lower bound
+  `∑ i, ((d - 1) deg Pᵢ + 1)` via `exists_linear_factors_of_span_eq_top`.
+- Exact `d`-D real multi-Gaussian rank (`MultiGaussian`, `d ≥ 2`): the alternating `2 d`-th
+  root-of-unity identity `re_prod_eq_sum_re` splits `Re (∏ j, z_j)` into `d` real `d`-way
+  products (`IsSumOfProducts.re`), giving both `d`-D finite-rank sufficiency for arbitrary
+  degrees and the upper bound `r + d * c` for `r` real + `c` nonreal Gaussians; Alder–Strassen
+  substitution on `(ι_R → ℝ) × (ι_C → ℂ)` (`single_complex_rank_ge`, `gaussianForm_rank_ge`)
+  proves the matching lower bound.
 
 ## Mathematics of the nonstandard proofs
 
@@ -144,6 +164,15 @@
 
 ## Lean gotchas met so far
 
+- Keep `RowSpan.lean` on homogeneous `Fin 2 → α` (with pattern-matched `fin2Vec`), not
+  dependent `∀ i : Fin 2, X i`: dependent `Fin 2` function types hit 200k-heartbeat `whnf`
+  timeouts when unifying `rowSpan` on `Fin 2 → ℝ≥0`.
+- Lean 4.36 / Mathlib `v4.36.0-rc2` linters: `push_neg` is deprecated in favor of `push Not`;
+  `MultilinearMap.coe_sum` is now `FunLike.coe_sum`; put `open scoped Classical in` *before*
+  the `/-- ... -/` docstring (never `let := Classical.propDecidable`, which is not an instance
+  and breaks `omega`). Use a top-level `abbrev` (not a local `let`) for Pi spaces so
+  `Pi.add_apply` and `Pi.smul_apply` fire in `simp`. Use `let := Classical.decEq ι` instead of
+  `classical` to avoid shadowing `Fin d`'s canonical `DecidableEq` in `Finset.mul_prod_erase`.
 - Translate space norm: `TranslationSemigroup` installs `translateNormedAddCommGroup`,
   `translateNormedSpace`, `translateUniformSpace`, `translateCompleteSpace` as local instances.
   The uniformity must be selected explicitly, otherwise instance search finds the subtype one
