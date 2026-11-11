@@ -19,8 +19,8 @@
   All nonstandard proofs share the same normalization (see "Mathematics of the nonstandard
   proofs" below).
 - `scripts/`: tool wrappers, setup and the check script; `.githooks/`: the pre-commit hook.
-- `README.md`: theorem statement, file table, commit history with Lean line counts, a summary
-  of the alternative proofs, and the suggested kernel-optimizer citation.
+- `README.md`: theorem statements, potential applications, file table, commit history with Lean
+  line counts, a summary of the alternative proofs, and the suggested kernel-optimizer citation.
 
 ## Toolchain and commands
 

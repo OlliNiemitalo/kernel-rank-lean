@@ -89,6 +89,61 @@ Translation acts on the finite-dimensional complex span of the translates of `φ
 continuous semigroup, hence `exp (t A)`. The profile is the initial vector, and evaluation at
 zero reads it back out. Continuity uses a norm compatible with the pointwise topology.
 
+## Potential applications
+
+On a `d`-dimensional Cartesian grid, direct spatial convolution with a dense `L × ⋯ × L` kernel
+evaluates `L^d` taps per grid point, whereas a sum of `R` coordinatewise products evaluates
+`d R L` 1-D taps per grid point (or `O(d R)` operations independent of `L` when 1-D exponential
+factors are realized recursively as causal/anti-causal IIR filters). Over `ℝ`,
+`separableRank_radial_lt_top_iff_exists` shows that continuous isotropic kernels `φ(‖x‖²)` with
+finite coordinatewise rank *must* be sums of polynomial-exponential components: positive real
+Gaussians alone are monotone in `r²` and cannot form flat passbands or zero crossings, while
+complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
+`exp(-α r²) cos(β r² + θ)` that can approximate oscillatory and flat-top isotropic kernels.
+
+* **2-D circularly symmetric blur, bokeh, and optical point-spread functions.** Camera defocus
+  disks, glare kernels, and Airy diffraction patterns `(J₁(r) / r)²` in microscopy and
+  photolithography optical proximity correction can be approximated by sums of `r` real and `c`
+  complex-conjugate Gaussians, as in
+  [kernel-optimizer](https://github.com/OlliNiemitalo/kernel-optimizer). Here
+  `separableRank_radial_eq_iff` shows that `r + 2 c` horizontal–vertical pass pairs (`2 r + 4 c`
+  1-D passes) is the exact minimum over `ℝ` for that representation.
+* **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
+  circular low-pass filter `J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
+  separable rank because of its algebraic radial decay, and can be approximated by complex-rate
+  Gaussians
+  ([DSP Stack Exchange #58449](https://dsp.stackexchange.com/questions/58449/efficient-implementation-of-2-d-circularly-symmetric-low-pass-filter)).
+  Applying the `m`-th harmonic ("beach-ball") differential operator
+  `((∂_x + i ∂_y) / 2)^m`
+  ([Mathematics Stack Exchange #3232122](https://math.stackexchange.com/questions/3232122/beach-ball-like-differential-operators-of-a-two-dimensional-function),
+  whose directional-derivative decomposition is the equal-factor case of `re_prod_eq_sum_re`) to
+  any smooth radial kernel `φ(x² + y²)` produces the pure polar-separable harmonic
+  `(x + i y)^m φ^(m)(x² + y²) = r^m exp(i m θ) φ^(m)(r²)` with no lower-order radial derivative
+  terms. By convolution associativity, smoothing an image once with an isotropic multi-Gaussian
+  low-pass filter and then applying compact derivative stencils yields grid-isotropic gradients
+  and higher-order steerable edge detectors
+  ([DSP Stack Exchange #58287](https://dsp.stackexchange.com/a/58287/15347)).
+* **3-D volumetric filtering and band-limited wave propagation (`d = 3`).** In 3-D imaging
+  (cryo-EM, CT, MRI) and dispersion-free band-limited acoustic time-stepping—where advancing the
+  constant-speed wave equation on a coarse Cartesian grid applies a spherically symmetric radial
+  operator—direct `L³` stencils quickly become prohibitive. For `r` real and `c`
+  complex-conjugate Gaussians, `separableRank_radial_gaussian_profile` gives exact real 3-way
+  rank `r + 3 c`: the alternating root-of-unity identity `re_prod_eq_sum_re` realizes each
+  complex-rate Gaussian in `3` real 3-way terms (`9` real 1-D passes on real-valued volume
+  buffers, rather than `2^(3 - 1) = 4` terms / `12` passes from naive real-and-imaginary
+  expansion), and proves that no real 3-way factorization uses fewer than `r + 3 c` terms.
+* **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
+  Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
+  sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center
+  integrals into sums of 1-D coordinate products (as in Boys/Gaussian expansions in quantum
+  chemistry and separated-representation fast solvers); the classification theorem establishes
+  that exponential-polynomial profiles in `r²` are the only continuous radial kernels admitting
+  exact finite coordinatewise rank.
+* **Ellipsoidal and `ℓ_p` coordinate warps.** Because coordinatewise surjections preserve
+  separable rank (`separableRank_comp_surjective`), the same classification and exact rank
+  formulas hold verbatim for axis-aligned anisotropic kernels `φ(∑ j, x_j² / a_j²)` (such as
+  stretched voxel spacings) and `ℓ_p` superellipsoidal profiles `φ(∑ j, |x_j|^p)` (`p > 0`).
+
 ## Files
 
 The proof is in [KernelRankLean](KernelRankLean):
@@ -143,9 +198,9 @@ size, not mathematical complexity.
 | [`240dea0`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/240dea077b40a8aa9ce0e90ea13d8e546614f594) | Compute exact rank over the complex numbers; use conjugate expansion and scalar extension | 1,340 | 1,169 | -1 |
 | [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
-| This revision | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
+| [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
 
-Deltas compare consecutive rows (the commits between `cae13d6` and this revision only touch
+Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25
 nonblank lines smaller** than the initial proof. Complexification saved 110 lines in the
 proof-specific parts, but its reusable infrastructure makes the whole change essentially
@@ -164,7 +219,7 @@ It still has **271 more physical lines than `0d9d939`** (and 247 more than `240d
 Thus it reduces the extended proof, but has not yet made it smaller than the earlier
 classification-only proof.
 
-This revision extends `KernelRankLean` from two coordinates to arbitrary dimension `d ≥ 2`:
+`6aabb4d` extends `KernelRankLean` from two coordinates to arbitrary dimension `d ≥ 2`:
 [MultiComplexRank.lean](KernelRankLean/MultiComplexRank.lean) (1,008 physical lines) proves the
 exact `d`-way complex exponential-polynomial rank, and
 [MultiGaussian.lean](KernelRankLean/MultiGaussian.lean) (978 physical lines) proves the
