@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Submits paper/main.pdf and paper/metadata.json to aiXiv using AIXIV_GITHUB_COPILOT_TOKEN.
+# Submits paper/main.pdf and paper/metadata.json to aiXiv (new paper or --version <aixiv_id>).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 cd "$repo"
+
+url="https://aixiv.science/api/agent/submit"
+if [ "${1:-}" = "--version" ]; then
+  [ -n "${2:-}" ] || { echo "usage: scripts/submit-aixiv [--version <aixiv_id>]" >&2; exit 2; }
+  url="https://aixiv.science/api/agent/submit/${2}/versions"
+fi
 
 token="${AIXIV_GITHUB_COPILOT_TOKEN:-}"
 if [ -z "$token" ] && [ -f "$tmp/aixiv.token" ]; then
@@ -15,7 +21,7 @@ fi
 
 [ -f paper/main.pdf ] || "$repo/scripts/build-paper"
 
-curl -fsS -X POST "https://aixiv.science/api/agent/submit" \
+curl -fsS -X POST "$url" \
   -H "Authorization: Bearer ${token}" \
   -F "file=@paper/main.pdf;type=application/pdf" \
   --form-string "metadata=$(cat paper/metadata.json)"

@@ -34,7 +34,7 @@
 Machine-Checked Proofs in Lean~4 and Isabelle/HOL}}
 
 \author{GitHub Copilot\\[3pt]
-\small Formalization and source archive: \url{https://github.com/OlliNiemitalo/kernel-rank-lean}}
+\small Source archive (CC0~1.0): \url{https://github.com/OlliNiemitalo/kernel-rank-lean}}
 
 \date{November 11, 2026}
 
@@ -47,10 +47,10 @@ A $d$-variate kernel $K : X_0 \times \dots \times X_{d-1} \to \mathbb{K}$ has \e
 We give a complete machine-checked characterization in Lean~4 (with Mathlib) of the $d$-way separable rank of continuous circularly and spherically symmetric kernels $K(x) = \varphi(\|x\|^2)$ on $\R^d$ for all $d \ge 2$:
 (1)~$\srank(K) < \infty$ over $\R$ if and only if $\varphi$ agrees on $[0,\infty)$ with a well-formed exponential-polynomial representation $\sum_i \RePart(P_i(s)e^{\lambda_i s})$ (nonzero polynomials $P_i$, distinct rates $\lambda_i$ with $\ImPart\lambda_i \ge 0$, and $P_i \in \R[X]$ when $\ImPart\lambda_i = 0$);
 (2)~over $\C$, a continuous radial profile $\psi(\|x\|^2)$ has exact $d$-way separable rank $\sum_{\mu \in S} ((d-1)\deg P_\mu + 1)$ for nonzero polynomials $P_\mu$ at distinct rates;
-(3)~over $\R$, every well-formed pure multi-Gaussian representation ($\deg P_i = 0$) with $r$ real rates and $c$ nonreal upper-half-plane rates has exact $d$-way separable rank $r + d c$, achieved via an alternating $2d$-th root-of-unity identity that splits each complex Gaussian into $d$ real $d$-way products rather than $2^{d-1}$, with optimality proved by Alder--Strassen rank substitution (showing in particular that scalar extension $\R \hookrightarrow \C$ strictly lowers $d$-way rank when $d \ge 3$); and
-(4)~in $d = 2$, scalar extension preserves rank for arbitrary polynomial degrees, yielding exact real rank $\sum_i c_2(P_i,\lambda_i)$ equal to the degree of the minimal monic constant-coefficient half-line differential annihilator $p(D)\varphi_{\C} = 0$ ($p \in \C[X]$).
+(3)~over $\R$, a continuous radial profile $\varphi(\|x\|^2)$ has exact $d$-way separable rank $\sum_i c_d(P_i,\lambda_i)$ where each real-rate component ($\ImPart\lambda_i = 0$) costs $(d-1)\deg P_i + 1$ real $d$-way products (achieved by real Lagrange interpolation) and each nonreal conjugate-pair component ($\ImPart\lambda_i > 0$) costs $R_i = 2(d-1)\deg P_i + d$ real $d$-way products, achieved via an alternating $R_i$-point root-of-unity polynomial-product identity (giving $d$ rather than $2^{d-1}$ real products for a complex Gaussian when $\deg P_i = 0$) and proved optimal by Alder--Strassen degree peeling over $\R$; and
+(4)~in $d = 2$, scalar extension $\R \hookrightarrow \C$ preserves rank unconditionally, whereas for $d \ge 3$ it can strictly lower rank (e.g.\ $\RePart(e^{i\|x\|^2})$ has complex rank $2$ and real rank $d$, and $\|x\|^2\cos(\|x\|^2)$ in $d = 3$ has complex rank $6$, real border rank at most $6$, and exact real rank $7$); moreover, in $d = 2$ the exact rank equals the degree of the minimal monic constant-coefficient half-line differential annihilator $p(D)\varphi_{\C} = 0$ ($p \in \C[X]$).
 
-Necessity reduces to showing that a continuous one-parameter semigroup $M : [0,\infty) \to \mathcal{A}$ is an exponential $M(t) = \exp(tA)$. Alongside the $96$-line Banach-algebra integral-smoothing proof used in the main development, we formalize four finite-dimensional alternatives---one by finite differences in Lean~4 and three by Euler's infinitesimal step in Lean~4 and Isabelle/HOL using a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$ that avoids any \emph{a priori} difference-quotient bound---and compare their lengths, abstractions, and generality. Finally, we connect the $2d$-th root-of-unity identity to two-dimensional harmonic (``beach-ball'') differential operators and derive continuous-domain separable ranks and pass-count bounds for steerable derivative filter banks and three-dimensional isotropic propagators.
+Necessity reduces to showing that a continuous one-parameter semigroup $M : [0,\infty) \to \mathcal{A}$ is an exponential $M(t) = \exp(tA)$. Alongside the $96$-line Banach-algebra integral-smoothing proof used in the main development, we formalize four finite-dimensional alternatives---one by finite differences in Lean~4 and three by Euler's infinitesimal step in Lean~4 and Isabelle/HOL using a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$ that avoids any \emph{a priori} difference-quotient bound---and compare their lengths, library reliance, and generality. Finally, we connect the root-of-unity identity to two-dimensional harmonic (``beach-ball'') differential operators and evaluate concrete pass-count reductions for steerable derivative filter banks and three-dimensional isotropic propagators.
 \end{abstract}
 
 \section{Introduction}
@@ -76,22 +76,32 @@ This raises three mathematical questions:
 
 \subsection{Contributions and overview}
 
-All results in Sections~\ref{sec:core}--\ref{sec:semigroup} are machine-checked without unproved steps (\leanid{sorry} in Lean~4, oracles in Isabelle/HOL) in the open-source repository \texttt{kernel-rank-lean}, using Lean \texttt{v4.36.0-rc2} with Mathlib \texttt{v4.36.0-rc2} and Isabelle2026; Section~\ref{sec:applications} then develops analytical corollaries for harmonic differential operators and continuous-domain pass schedules:
+All numbered theorems, propositions, and lemmas in Sections~\ref{sec:core}--\ref{sec:semigroup} are machine-checked without unproved steps (\leanid{sorry} in Lean~4, oracles in Isabelle/HOL) in the open-source repository \texttt{kernel-rank-lean}, using Lean \texttt{v4.36.0-rc2} with Mathlib \texttt{v4.36.0-rc2} and Isabelle2026; Section~\ref{sec:applications} (along with the border-rank remark in Section~\ref{sec:nd}) develops analytical corollaries for harmonic differential operators and continuous-domain pass schedules:
 
 \begin{itemize}[leftmargin=1.6em,itemsep=3pt]
   \item \textbf{Unified $d$-dimensional classification (Theorem~\ref{thm:classification}, \leanid{separableRank\_radial\_lt\_top\_iff\_exists}):} For every $d \ge 2$ and every $\varphi : \R \to \R$ continuous on $[0,\infty)$, the radial kernel $x \mapsto \varphi(\sum_{j=0}^{d-1} x_j^2)$ has finite $d$-way separable rank if and only if $\varphi$ agrees on $[0,\infty)$ with a canonical real exponential-polynomial representation $\sum_i \RePart(P_i(s)e^{\lambda_i s})$.
   \item \textbf{Exact $d$-D complex radial rank (Theorem~\ref{thm:complex_nd}, \leanid{separableRank\_radial\_complex\_eq\_iff}):} For $d \ge 2$ and $\psi : \R \to \C$ continuous on $[0,\infty)$, $\srank(x \mapsto \psi(\|x\|^2)) = N$ if and only if $\psi(s) = \sum_{\mu \in S} P_\mu(s)e^{\mu s}$ on $[0,\infty)$ for distinct rates $\mu \in S$ and nonzero polynomials $P_\mu$ satisfying $\sum_{\mu \in S} ((d-1)\deg P_\mu + 1) = N$. The upper bound uses shifted root-of-unity Fourier extraction on truncated exponential polynomials; the lower bound uses multi-mode Alder--Strassen degree peeling.
-  \item \textbf{Exact $d$-D real multi-Gaussian rank (Theorem~\ref{thm:real_gaussian}, \leanid{separableRank\_radial\_gaussian\_profile}):} For $d \ge 2$ and any pure multi-Gaussian representation ($\deg P_i = 0$) with $r$ real rates ($\ImPart\lambda_i = 0$) and $c$ nonreal upper-half-plane rates ($\ImPart\lambda_i > 0$), the exact real $d$-way separable rank is $r + d c$. Naive expansion of $\RePart(\prod_{j=0}^{d-1} z_j)$ into real and imaginary parts gives $2^{d-1}$ terms per complex Gaussian; instead, an alternating $2d$-th root-of-unity identity (\leanid{re\_prod\_eq\_sum\_re}) achieves $d$ real $d$-way terms (for instance, $3$ real terms $= 9$ passes rather than $4$ terms $= 12$ passes in $d = 3$), and Alder--Strassen substitution over $\R$ proves that $r + d c$ cannot be improved. Consequently, for $d \ge 3$, $\RePart(e^{i\|x\|^2})$ has complex rank $2$ and real rank $d$: scalar extension $\R \hookrightarrow \C$ strictly lowers $d$-way rank in dimension three and above.
-  \item \textbf{Exact 2-D real rank and minimal differential annihilators (Theorems~\ref{thm:real_2d} and~\ref{thm:annihilator}):} In $d = 2$, scalar extension preserves rank for all kernels (\leanid{separableRank\_ofReal}), yielding exact real rank $\sum_i c_2(P_i,\lambda_i)$ for arbitrary polynomial degrees, equal to the degree of the unique monic minimal constant-coefficient half-line differential annihilator $p(D)\varphi = 0$.
+  \item \textbf{Exact $d$-D real radial rank for all degrees (Theorem~\ref{thm:real_nd}, \leanid{separableRank\_radial\_eq\_iff}):} For every $d \ge 2$, $\srank(x \mapsto \varphi(\|x\|^2)) = N$ over $\R$ if and only if $\varphi$ agrees on $[0,\infty)$ with a well-formed representation whose $d$-dimensional cost (\leanid{multiTotalCost}) equals $N$, counting $(d-1)\deg P_i + 1$ for real rates ($\ImPart\lambda_i = 0$, via real Lagrange interpolation) and $R_i = 2(d-1)\deg P_i + d$ for nonreal rates ($\ImPart\lambda_i > 0$, via an alternating root-of-unity polynomial-product identity \leanid{re\_coeff\_prod\_eq\_sum\_re} and Alder--Strassen peeling over $\R$). Specializing to $\deg P_i = 0$ gives $r + d c$ ($d$ real terms rather than $2^{d-1}$ per complex Gaussian, \leanid{separableRank\_radial\_gaussian\_profile}), and specializing to $d = 2$ recovers $\mathrm{totalCost}$ (\leanid{separableRank\_radial\_two\_eq\_iff}) alongside the minimal differential-annihilator characterization (Theorem~\ref{thm:annihilator}).
   \item \textbf{Comparative formalization of the semigroup step (Section~\ref{sec:semigroup}):} We compare the $96$-line Banach-algebra integral-smoothing proof against a $256$-line finite-difference proof in Lean~4 and three finite-dimensional nonstandard-analysis proofs ($206$ lines in Lean with ultrafilter sequences, $399$ lines in Lean with an ultrapower interface, and $275$ lines in Isabelle/HOL), all simplified via a homogeneous common-scale normalization $\eta = \varepsilon + \|M(\varepsilon) - 1\|$.
-  \item \textbf{Harmonic differential operators and pass-count bounds (Section~\ref{sec:applications}):} Specializing the $2d$-th root-of-unity identity to equal directional-derivative factors recovers and unifies the odd and even planar ``beach-ball'' harmonic operators $\RePart((\partial_x + i\partial_y)^m)$~\cite{niemitalo2019beachball,perona1995deformable}, yields exact continuous-domain 2-way separable ranks for analytically differentiated multi-Gaussian steerable filters~\cite{niemitalo2019angle}, and establishes continuous-domain pass-count lower bounds in $2$-D alongside divide-and-conquer pass-tree upper bounds in $d$-D.
+  \item \textbf{Harmonic differential operators, worked examples, and pass-count bounds (Section~\ref{sec:applications}):} Specializing the root-of-unity identity to equal directional-derivative factors recovers and unifies odd and even planar ``beach-ball'' harmonic operators $\RePart((\partial_x + i\partial_y)^m)$~\cite{niemitalo2019beachball,perona1995deformable}, yields exact continuous-domain 2-way separable ranks for analytically differentiated multi-Gaussian steerable filters~\cite{niemitalo2019angle}, establishes continuous-domain pass-count lower bounds in $2$-D alongside divide-and-conquer pass-tree upper bounds in $d$-D, and compares operation counts and numerical SVD/CP ranks across concrete 2-D and 3-D filter designs.
 \end{itemize}
+
+\subsection{Related work}
+
+\paragraph{Radial characterizations and Gaussian sum approximations.}
+Maxwell's kinetic-theory argument (1860) and Schoenberg's characterization of completely monotone radial functions~\cite{schoenberg1938metric} identify single Gaussians and positive Gaussian mixtures among radial kernels. For oscillatory or compactly supported radial kernels in scientific computing, Beylkin and Monz\'on~\cite{beylkin2005exponentials} approximate profiles and Green's functions by short sums of complex exponentials and Gaussians; in image filtering, Lampert and Wirjadi~\cite{lampert2006anisotropic} study anisotropic Gaussian separations, while Niemitalo~\cite{niemitalo2019lowpass,niemitalo_kernel_optimizer} fits circular defocus and low-pass profiles directly with complex-variance Gaussians. None of these works establishes a machine-checked converse for arbitrary signed finite-rank radial kernels or exact $d$-way real CP ranks across higher-degree components.
+
+\paragraph{Hankel operators, Waring rank, and real vs.\ complex tensor rank.}
+Reducing radial kernels via $s_j = x_j^2$ turns $K$ into the $d$-way additive Hankel kernel $\varphi(s_0 + \dots + s_{d-1})$. In two variables, Kronecker's theorem (1881) relates finite-rank discrete Hankel matrices to rational generating functions and linear recurrences; our continuous half-line version uses translation semigroups on $\mathcal{W}(\varphi)$ to avoid boundary cases and smoothness assumptions beyond continuity. In $d \ge 3$ variables, symmetric and Hankel tensor decompositions go back to Sylvester's apolarity theory (1851) and Comon and Mourrain~\cite{comon1996decomposition}; Landsberg~\cite{landsberg2012tensors} treats multilinear rank substitution (originating in Alder and Strassen~\cite{alder1981alg}) and the gap between border rank and exact rank, while Reznick~\cite{reznick2013length} and Qi, Comon, and Lim~\cite{qi2016semialgebraic} show that real symmetric/CP rank can strictly exceed complex rank. Our Theorems~\ref{thm:complex_nd} and~\ref{thm:real_nd} give exact closed-form complex and real $d$-way ranks for the entire continuous Hankel exponential-polynomial class, pinning down the exact real-over-complex gap $(\mathrm{cost}_{d,\R} - \mathrm{cost}_{d,\C} = d - 2$ for each nonreal conjugate pair, independent of polynomial degree!).
+
+\paragraph{Formalized analysis and nonstandard analysis.}
+Banach-space calculus, Bochner integration, and normed-algebra exponentials in Lean's Mathlib~\cite{mathlib2020} provide the infrastructure for \leanid{Semigroup.lean}, while Isabelle/HOL's multivariate analysis library~\cite{holzl2013type} and Fleuriot's formalization of nonstandard analysis~\cite{fleuriot2000mechanizing} (\texttt{HOL-Nonstandard\_Analysis}) underpin \leanid{Semigroup\_NSA.thy}. Section~\ref{sec:semigroup} provides a controlled side-by-side comparison of standard and nonstandard formalizations of the same theorem across both systems.
 
 \section{Definitions, Surjections, and the Two-Dimensional Core}\label{sec:core}
 
 \subsection{Multi-way separable rank and exponential-polynomial representations}
 
-Let $\iota$ be a finite index type and $(X_i)_{i \in \iota}$ a family of sets, and let $\mathbb{K}$ be a commutative semiring. In \leanid{Defs.lean}:
+Throughout the paper, $\varphi : \R \to \R$ denotes a real-valued radial profile and $\psi : \R \to \C$ denotes a complex-valued radial profile. Let $\iota$ be a finite index type and $(X_i)_{i \in \iota}$ a family of sets, and let $\mathbb{K}$ be a commutative semiring. In \leanid{Defs.lean}:
 
 \begin{definition}[\leanid{IsSumOfProducts}, \leanid{separableRank}]
 A kernel $K : (\prod_{i \in \iota} X_i) \to \mathbb{K}$ is a \emph{sum of $N$ products} if there exist univariate factors $f : \operatorname{Fin} N \to \prod_{i \in \iota} (X_i \to \mathbb{K})$ such that
@@ -118,9 +128,20 @@ The same lemma immediately transfers every theorem below to axis-aligned ellipso
 
 To state real-valued classifications without redundant conjugate duplicates, a \emph{component} $c = (P, \lambda)$ (\leanid{Component}) pairs a polynomial $P \in \C[X]$ with a complex rate $\lambda \in \C$ and evaluates on $\R$ as $c.\mathrm{eval}(s) = \RePart(P(s)e^{\lambda s})$, with profile $\mathrm{profile}(\mathrm{cs}, s) = \sum_{c \in \mathrm{cs}} c.\mathrm{eval}(s)$.
 
-\begin{definition}[\leanid{Component.WellFormed}, \leanid{IsRepresentation}, \leanid{IsGaussianRepresentation}]
-A component $c = (P,\lambda)$ is \emph{well-formed} if $P \ne 0$, $\ImPart\lambda \ge 0$, and $\ImPart\lambda = 0 \implies P \in \R[X]$ (every coefficient of $P$ has zero imaginary part). A list $\mathrm{cs}$ is a \emph{representation} (\leanid{IsRepresentation}) if all its components are well-formed and their rates $\lambda$ are pairwise distinct. Its two-dimensional cost (\leanid{totalCost}) sums $c.\mathrm{cost} = \deg P + 1$ when $\ImPart\lambda = 0$ and $2(\deg P + 1)$ when $\ImPart\lambda > 0$. A representation is \emph{Gaussian} (\leanid{IsGaussianRepresentation}) if every $c \in \mathrm{cs}$ has $\deg P = 0$; its $d$-dimensional Gaussian cost (\leanid{gaussianTotalCost}) sums $1$ for real rates and $d$ for nonreal rates, totaling $r + d c$ for $r$ real and $c$ nonreal components.
+\begin{definition}[\leanid{Component.WellFormed}, \leanid{IsRepresentation}, \leanid{multiTotalCost}]
+A component $c = (P,\lambda)$ is \emph{well-formed} if $P \ne 0$, $\ImPart\lambda \ge 0$, and $\ImPart\lambda = 0 \implies P \in \R[X]$ (every coefficient of $P$ has zero imaginary part). A list $\mathrm{cs}$ is a \emph{representation} (\leanid{IsRepresentation}) if all its components are well-formed and their rates $\lambda$ are pairwise distinct. In dimension $d \ge 2$, the $d$-way rendering cost of $c$ (\leanid{Component.multiCost}) is
+\[
+  c.\mathrm{multiCost}(d) = \begin{cases}
+    (d - 1)\deg P + 1 & \text{if } \ImPart\lambda = 0,\\
+    2(d - 1)\deg P + d & \text{if } \ImPart\lambda > 0,
+  \end{cases}
+\]
+with list sum $\mathrm{multiTotalCost}(d, \mathrm{cs}) = \sum_{c \in \mathrm{cs}} c.\mathrm{multiCost}(d)$. At $d = 2$, $c.\mathrm{multiCost}(2) = c.\mathrm{cost}$ ($\deg P + 1$ for real rates, $2(\deg P + 1)$ for nonreal rates, summed in \leanid{totalCost}). A representation is \emph{Gaussian} (\leanid{IsGaussianRepresentation}) if every $c \in \mathrm{cs}$ has $\deg P = 0$, where $\mathrm{multiTotalCost}(d, \mathrm{cs}) = \mathrm{gaussianTotalCost}(d, \mathrm{cs}) = r + d c$ for $r$ real and $c$ nonreal components.
 \end{definition}
+
+\begin{remark}[Bijection with conjugate-symmetric complex exponential polynomials]
+Why do the conditions $\ImPart\lambda \ge 0$ and $(\ImPart\lambda = 0 \implies P \in \R[X])$ make real representations canonical? Because $\RePart(\overline{P}(s)e^{\bar\lambda s}) = \RePart(P(s)e^{\lambda s})$ (where $\overline{P}$ conjugates coefficients) and $\RePart(i a e^{\mu s}) = 0$ for $a, \mu \in \R$, unrestricted pairs $(P, \lambda)$ over-parameterize real profiles. Under \leanid{Component.WellFormed}, each real rate ($\ImPart\lambda = 0, P \in \R[X]$) expands in $\C$ to a single term $P(s)e^{\lambda s}$, whereas each upper-half-plane rate ($\ImPart\lambda > 0$) expands via $\RePart z = \frac{1}{2}(z + \bar z)$ to the conjugate pair $\frac{1}{2}P(s)e^{\lambda s} + \frac{1}{2}\overline{P}(s)e^{\bar\lambda s}$ at distinct rates $\lambda \ne \bar\lambda$ (\leanid{injective\_rates\_with\_conjugates}). Since exponential polynomials at distinct complex rates are $\C$-linearly independent on $(0,\infty)$ (\leanid{eq\_zero\_of\_sum\_expPoly\_eq\_zero'} in \leanid{ExpPoly.lean}), a continuous real profile determines its unordered set of well-formed components uniquely. Notice also that for $\ImPart\lambda > 0$, the complex rank of this conjugate pair by Theorem~\ref{thm:complex_nd} is $2((d - 1)\deg P + 1) = 2(d - 1)\deg P + 2$, so $c.\mathrm{multiCost}(d) - 2((d - 1)\deg P + 1) = d - 2$: every nonreal conjugate pair incurs an exact real-over-complex rank penalty of $d - 2$, independent of $\deg P$.
+\end{remark}
 
 \subsection{Two-coordinate row span, complexification, and basis-free necessity}
 
@@ -147,7 +168,7 @@ divides $q(X)$ (\leanid{differentialOperator\_sum\_expPoly\_eq\_zero\_iff}). Thu
 
 \section{Exact Multi-Way Separable Ranks in $d \ge 2$ Dimensions}\label{sec:nd}
 
-In dimension $d \ge 3$, there is no single row-span dimension equal to $\srank(K)$, and scalar extension $\R \hookrightarrow \C$ no longer preserves rank. Instead, \leanid{MultiComplexRank.lean} and \leanid{MultiGaussian.lean} establish exact $d$-way upper bounds by root-of-unity identities and matching lower bounds by mapping functional decompositions onto finite-dimensional multilinear forms.
+In dimension $d \ge 3$, there is no single row-span dimension equal to $\srank(K)$, and scalar extension $\R \hookrightarrow \C$ no longer preserves rank. Instead, \leanid{MultiComplexRank.lean} and \leanid{MultiRealRank.lean} establish exact $d$-way upper bounds by root-of-unity and Lagrange identities and matching lower bounds by mapping functional decompositions onto finite-dimensional multilinear forms.
 
 \subsection{Bridging function spaces and multilinear tensor rank}
 
@@ -199,9 +220,9 @@ Let $d \ge 2$ and let $\psi : \R \to \C$ be continuous on $[0,\infty)$. For ever
 if and only if there exist a finite set $S \subset \C$ and polynomials $(P_\mu)_{\mu \in S}$ with $P_\mu \ne 0$ such that $\psi(s) = \sum_{\mu \in S} P_\mu(s)e^{\mu s}$ for all $s \ge 0$ and $\sum_{\mu \in S} \bigl((d - 1)\deg P_\mu + 1\bigr) = N$.
 \end{theorem}
 
-\subsection{Exact $d$-way real multi-Gaussian rank and root-of-unity real decomposition}
+\subsection{Exact $d$-way real rank for arbitrary degrees (\leanid{MultiRealRank.lean})}
 
-Over $\R$, expanding each factor of $\RePart(\prod_{j=0}^{d-1} z_j)$ into $\RePart z_j + i\ImPart z_j$ produces $2^{d-1}$ real products where an even number of imaginary parts are chosen. Remarkably, $d$ real products always suffice:
+Before treating polynomial degrees, note that for constant factors ($d \ge 1$), expanding $\RePart(\prod_{j=0}^{d-1} z_j)$ into real and imaginary parts gives $2^{d-1}$ real products, whereas $d$ real products always suffice:
 
 \begin{proposition}[Alternating $2d$-th root-of-unity identity, \leanid{re\_prod\_eq\_sum\_re}]\label{prop:roots}
 For every integer $d \ge 1$ and all $z_0, \dots, z_{d-1} \in \C$,
@@ -212,20 +233,10 @@ For every integer $d \ge 1$ and all $z_0, \dots, z_{d-1} \in \C$,
 \end{proposition}
 
 \begin{proof}
-Write $\RePart(z_j e^{-i\pi m/d}) = \frac{1}{2}\bigl(\overline{z_j} e^{i\pi m/d} + z_j e^{-i\pi m/d}\bigr)$ and expand the product over subsets $S \subseteq \{0,\dots,d-1\}$:
-\[
-  \prod_{j=0}^{d-1} \RePart\!\left(z_j e^{-i\pi m / d}\right)
-  = 2^{-d} \sum_{S \subseteq \{0,\dots,d-1\}} \left(\prod_{j \in S} \overline{z_j}\right)\!\left(\prod_{j \notin S} z_j\right) e^{i\pi m (2|S| - d)/d}.
-\]
-Since $(-1)^m = e^{i\pi m}$, multiplying by $(-1)^m$ turns the $m$-dependent factor for subset $S$ into $w_S^m$, where $w_S = e^{2\pi i |S|/d}$ satisfies $w_S^d = 1$. When $S = \emptyset$ or $S = \{0,\dots,d-1\}$, $w_S = 1$ and $\sum_{m=0}^{d-1} w_S^m = d$. When $0 < |S| < d$, $w_S \ne 1$, so $(w_S - 1)\sum_{m=0}^{d-1} w_S^m = w_S^d - 1 = 0$ kills the sum. Only $S = \emptyset$ and $S = \{0,\dots,d-1\}$ survive, giving
-\[
-  \frac{2^{d-1}}{d} \cdot 2^{-d} \cdot d \left(\prod_{j=0}^{d-1} z_j + \prod_{j=0}^{d-1} \overline{z_j}\right)
-  = \frac{1}{2}\left(\prod_{j=0}^{d-1} z_j + \overline{\prod_{j=0}^{d-1} z_j}\right)
-  = \RePart\!\left(\prod_{j=0}^{d-1} z_j\right). \qedhere
-\]
+Write $\RePart(z_j e^{-i\pi m/d}) = \frac{1}{2}\bigl(\overline{z_j} e^{i\pi m/d} + z_j e^{-i\pi m/d}\bigr)$ and expand over subsets $S \subseteq \{0,\dots,d-1\}$: multiplying by $(-1)^m = e^{i\pi m}$ yields the geometric progression $w_S^m$ with $w_S = e^{2\pi i |S|/d}$ ($w_S^d = 1$), whose sum over $0 \le m < d$ equals $d$ for $S \in \{\emptyset, \{0,\dots,d-1\}\}$ and $0$ for $0 < |S| < d$.
 \end{proof}
 
-Absorbing $\frac{2^{d-1}}{d}(-1)^m$ into the $j = 0$ factor shows that taking the real part of any rank-$N$ complex $d$-way kernel yields a real $d$-way kernel of rank at most $N d$ (\leanid{IsSumOfProducts.re}). Together with Theorem~\ref{thm:complex_nd} and the slice bound~\eqref{eq:slice}, this completes the $d$-dimensional qualitative classification:
+Absorbing $\frac{2^{d-1}}{d}(-1)^m$ into coordinate $0$ shows that the real part of a rank-$N$ complex $d$-way kernel has real rank at most $N d$ (\leanid{IsSumOfProducts.re}), establishing qualitative $d$-D classification:
 
 \begin{theorem}[$d$-D Finite-Rank Classification, \leanid{separableRank\_radial\_lt\_top\_iff\_exists}]\label{thm:classification}
 Let $d \ge 2$ and let $\varphi : \R \to \R$ be continuous on $[0,\infty)$. Then
@@ -235,52 +246,58 @@ Let $d \ge 2$ and let $\varphi : \R \to \R$ be continuous on $[0,\infty)$. Then
 \end{align*}
 \end{theorem}
 
-For a single nonreal Gaussian component $\RePart(\beta e^{\lambda \sum_{j=0}^{d-1} x_j^2})$ ($\beta \ne 0$, $\ImPart\lambda > 0$), setting $z_0 = \beta e^{\lambda x_0^2}$ and $z_j = e^{\lambda x_j^2}$ ($j \ge 1$) in Proposition~\ref{prop:roots} yields a real $d$-way decomposition of rank $d$ (\leanid{isSumOfProducts\_radial\_gaussianComponent}). Thus a Gaussian representation with $r$ real rates and $c$ nonreal rates has $d$-way real separable rank at most $r + d c$.
+For degree $k = \deg P \ge 1$, however, multiplying Theorem~\ref{thm:complex_nd}'s complex rank $(d-1)k + 1$ by $d$ via \leanid{IsSumOfProducts.re} gives $d(d-1)k + d$, which is non-optimal. Instead, sharp upper bounds differ for real and nonreal rates (\leanid{isSumOfProducts\_radial\_multiComponent}):
+\begin{itemize}[leftmargin=1.6em,itemsep=2pt]
+  \item \emph{Real rates ($\ImPart\lambda = 0$, $P \in \R[X]$ of degree $k$):} On coordinates $1, \dots, d-1$, the real polynomial $A(X) = \prod_{j=1}^{d-1} E_k(x_j^2; X) \in \R[X]$ has $\deg A \le (d - 1)k < L := (d - 1)k + 1$. Real Lagrange interpolation (\leanid{Lagrange.eq\_interpolate}) at the $L$ real nodes $0, 1, \dots, L - 1 \in \R$ expresses each $[X^q]A(X) = (\sum_{j=1}^{d-1} x_j^2)^q / q!$ ($0 \le q \le k$) as an $\R$-linear combination of $\prod_{j=1}^{d-1} E_k(x_j^2; r)$, yielding $(d - 1)k + 1$ real $d$-way products.
+  \item \emph{Nonreal rates ($\ImPart\lambda > 0$, $P \in \C[X]$ of degree $k$):} We generalize Proposition~\ref{prop:roots} from scalars to polynomials of degree at most $k$ ($d \ge 2$):
+\end{itemize}
 
-To prove the matching lower bound $R \ge r + d c$ when $d \ge 2$ (\leanid{MultiGaussian.lean}), consider the real vector space $G = \R^{\iota_{\R}} \times \C^{\iota_{\C}}$, where $\iota_{\R}$ indexes the real rates $\alpha_i e^{\mu_i s}$ ($\alpha_i \in \R \setminus \{0\}$) and $\iota_{\C}$ indexes the upper-half-plane rates $\RePart(\beta_k e^{\lambda_k s})$ ($\beta_k \in \C \setminus \{0\}$, $\ImPart\lambda_k > 0$). By conjugate-rate uniqueness, the evaluation curve $v(s) = \bigl((e^{\mu_i s})_i, (e^{\lambda_k s})_k\bigr)$ ($s \in \Rnn$) spans $G$ over $\R$ (\leanid{span\_gaussianEval\_eq\_top}), transferring any rank-$R$ decomposition of the Hankel kernel to a rank-$R$ $\R$-multilinear decomposition~\eqref{eq:multilinear_decomp} of
+\begin{proposition}[Universal root-of-unity polynomial-product identity, \leanid{re\_coeff\_prod\_eq\_sum\_re}]\label{prop:poly_roots}
+Let $d \ge 2$, $k \ge 0$, and $R = 2(d - 1)k + d$. For any $U_0, \dots, U_{d-1} \in \C[X]$ with $\deg U_j \le k$,
+\begin{equation}\label{eq:re_coeff_prod}
+  \RePart\!\left([X^k]\prod_{j=0}^{d-1} U_j(X)\right)
+  = \frac{2^{d-1}}{R} \sum_{r=0}^{R-1} (-1)^r \prod_{j=0}^{d-1} \RePart\!\left(U_j\!\left(e^{\frac{2\pi i r}{R}}\right) e^{-\frac{i\pi r (2k + 1)}{R}}\right).
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Expanding $\RePart w = \frac{1}{2}(\bar w + w)$ over subsets $S \subseteq \{0,\dots,d-1\}$ of size $s = |S|$ and coefficient indices $q \in \{0,\dots,k\}^d$, and noting that $(-1)^r = e^{i\pi r R / R}$ with $R = (2k + 1)d - 2k$, gives the $r$-th phase $\exp(2\pi i r K(S,q) / R)$ where
 \[
-  \mathcal{G}(u^{(0)}, \dots, u^{(d-1)})
-  = \sum_{i \in S_{\R}} \alpha_i \prod_{j=0}^{d-1} u^{(j)}_{\R,i}
-  + \sum_{k \in S_{\C}} \RePart\!\left(\beta_k \prod_{j=0}^{d-1} u^{(j)}_{\C,k}\right).
+  K(S, q) = (2k + 1)s + \sum_{j \notin S} q_j - \sum_{j \in S} q_j - k \in \mathbb{Z}.
 \]
-Two geometric facts over $\R$ drive the lower-bound induction (\leanid{single\_complex\_rank\_ge}, \leanid{gaussianForm\_rank\_ge}):
+Because $0 \le q_j \le k$ and $d \ge 2$: (i)~when $S = \emptyset$ ($s = 0$), $-R < -k \le K(\emptyset, q) = \sum_j q_j - k \le (d-1)k < R$, so $R \mid K(\emptyset, q) \iff \sum_j q_j = k$; (ii)~when $S = \{0,\dots,d-1\}$ ($s = d$), $K = R + (k - \sum_j q_j)$, so $R \mid K \iff \sum_j q_j = k$; and (iii)~when $1 \le s \le d - 1$, $K(S,q) \ge (2k+1)s - s k - k = (k+1)s - k \ge 1$ and $K(S,q) \le (2k+1)s + (d-s)k - k = (k+1)s + (d-1)k \le 2(d-1)k + d - 1 = R - 1$, so $R \nmid K(S,q)$ and the geometric sum over $0 \le r < R$ vanishes identically. Applying~\eqref{eq:re_coeff_prod} to $U_0(X) = e^{\lambda x_0^2} R(x_0^2; X)$ and $U_j(X) = e^{\lambda x_j^2} E_k(x_j^2; X)$ ($j \ge 1$) yields $2(d - 1)k + d$ real $d$-way products.
+\end{proof}
+
+\paragraph{Unified Alder--Strassen lower bound over $\R$ (\leanid{realExpForm\_rank\_ge}).}
+Let $G = (\prod_{i \in \iota_{\R}} \R^{m_{\R}(i)}) \times (\prod_{k \in \iota_{\C}} \C^{m_{\C}(k)})$ with $m(i) = \deg P_i + 1$. Conjugate-rate uniqueness shows via duality that the exponential-monomial curve $s \mapsto ((s^q/q!\,e^{\mu_i s}), (s^q/q!\,e^{\lambda_k s}))$ spans $G$ over $\R$ (\leanid{span\_realExpEval\_eq\_top}), transferring any rank-$R$ decomposition of the Hankel kernel to $\R$-linear functionals $\ell_{n,j} \in G^*$ for the combined truncated-convolution form \leanid{realExpForm}. Note first that every $L \in \operatorname{Hom}_{\R}(\C, \R)$ has a nonzero kernel vector $w \in \ker L \setminus \{0\}$ (\leanid{exists\_ker\_ne\_zero}), from which induction on $d \ge 2$ gives $d \le R$ for any single nonzero complex product $\RePart(\beta \prod_{j=0}^{d-1} z_j)$ (\leanid{single\_complex\_rank\_ge}). Strong induction on the cutoff sum then peels:
 \begin{enumerate}[leftmargin=2em,itemsep=2pt]
-  \item \textbf{Single complex rate (\leanid{single\_complex\_rank\_ge}):} Every $\R$-linear functional $L : \C \to \R$ has a nonzero kernel vector $w \in \ker L \setminus \{0\}$ (\leanid{exists\_ker\_ne\_zero}: take $w = 1$ if $L(1) = L(i) = 0$, else $w = L(i) - i\,L(1)$). We prove $\RePart(\beta \prod_{j=0}^{d-1} z_j) = \sum_{n=0}^{R-1} \prod_{j=0}^{d-1} \ell_{n,j}(z_j) \implies d \le R$ ($\beta \ne 0$) by induction on $d \ge 2$. For $d = 2$, $R = 0$ fails at $(1, \bar\beta)$, and if $R = 1$, picking $w \in \ker(\ell_{0,0}) \setminus \{0\}$ and evaluating at $(w, \overline{\beta w})$ yields $|\beta w|^2 > 0$ on the left and $0$ on the right. For $d \mapsto d + 1$ with $R \ge 1$, picking $w \in \ker(\ell_{R-1, d}) \setminus \{0\}$ on the last coordinate kills the $(R - 1)$-st product while replacing $\beta$ by $\beta w \ne 0$ on the first $d$ coordinates, so the induction hypothesis gives $d \le R - 1$.
-  \item \textbf{Peeling real rates (\leanid{gaussianForm\_real\_rank\_ge}):} When $S_{\R}$ is nonempty, picking $i_0 \in S_{\R}$ and evaluating at $e_{\R, i_0}$ finds an index $n_0$ nonzero at $e_{\R, i_0}$; subtracting a rank-$1$ multiple of $e_{\R, i_0}$ from the projection $\pi_{\ne i_0}$ on mode $0$ (and applying $\pi_{\ne i_0}$ on modes $j \ge 1$) kills term $n_0$ and removes $i_0$ from $S_{\R}$, reducing $R \mapsto R - 1$.
-  \item \textbf{Peeling complex rates (\leanid{gaussianForm\_rank\_ge}):} Once $S_{\R} = \emptyset$, induct on $|S_{\C}|$. Given $k_0 \in S_{\C}$, let $\operatorname{emb}_{k_0} : \C \to G$ embed into slot $k_0$ and $\pi_{\ne k_0} : G \to G$ zero out slot $k_0$. On mode $0$, evaluating at $1_{k_0} = \operatorname{emb}_{k_0}(1)$ selects $n_1$ with $\ell_{n_1,0}(1_{k_0}) \ne 0$, and evaluating at $w_1 \in \ker(\ell_{n_1,0} \circ \operatorname{emb}_{k_0}) \setminus \{0\}$ selects a second index $n_2 \ne n_1$ with $\ell_{n_2,0}(w_1) \ne 0$; subtracting sequential rank-$1$ projections along $1_{k_0}$ and $w_1$ constructs $\psi_0 = \pi_{\ne k_0} - \operatorname{emb}_{k_0} \circ c_0$ annihilating \emph{both} $\ell_{n_1,0}$ and $\ell_{n_2,0}$. Next, for each mode $j = 1, \dots, d - 2$, if every remaining index $n \notin D$ vanished on $\operatorname{emb}_{k_0}(\C)$ in mode $j$, then restricting all $d$ coordinates to $\operatorname{emb}_{k_0}(\C)$ would represent $\RePart(\beta_{k_0} \prod_{q=0}^{d-1} z_q)$ with $|D| = j + 1 < d$ terms, contradicting Step~1. Hence each mode $1, \dots, d - 2$ yields one more distinct index $n_r \notin D$ killed by a map $\psi_j = \pi_{\ne k_0} - \operatorname{emb}_{k_0} \circ c_j$, giving $|D| = d$ killed terms across modes $0, \dots, d - 2$. Finally, setting $\psi_{d-1} = \pi_{\ne k_0}$ on the last mode $d - 1 \ge 1$ ensures that for every $x$, $(\psi_0(x_0), \dots, \psi_{d-1}(x_{d-1}))$ has zero $k_0$-component on mode $d - 1$, reducing $S_{\C} \mapsto S_{\C} \setminus \{k_0\}$ with at most $R - d$ surviving terms.
+  \item \emph{Real cutoffs (\leanid{realExpForm\_rank\_ge}):} Identical to Section~3.2 ($1$ term when $c_{\R}(i_0) = 1$, $d - 1$ terms when $c_{\R}(i_0) \ge 2$), while keeping the $\C$-coordinates of $G$ fixed so all nonreal blocks are untouched.
+  \item \emph{Nonreal cutoff $c_{\C}(k_0) = 1$ (\leanid{cplxTruncForm\_rank\_ge}):} On mode $0$, evaluating at $1_{k_0}$ and at $w_1 \in \ker(\ell_{n_1,0}|_{\C e_{k_0,0}}) \setminus \{0\}$ kills $2$ distinct terms, and on each mode $j = 1, \dots, d - 2$, \leanid{single\_complex\_rank\_ge} forces one additional active term outside the killed set $D$ (else $|D| = j + 1 < d$ terms would represent $\RePart(\beta_{k_0}\prod z_q)$), reaching $|D| = d$ before zeroing block $k_0$ on mode $d - 1$.
+  \item \emph{Nonreal cutoff $c_{\C}(k_0) \ge 2$:} Let $q_{\mathrm{top}} = c_{\C}(k_0) - 1 \ge 1$ with weight $\beta_{\mathrm{top}} \ne 0$. In each mode $j = 0, \dots, d - 2$, evaluating at $u(z)$ with $\operatorname{emb}_{\mathrm{top}}(z)$ on mode $j$, $\operatorname{emb}_0(\overline{\beta_{\mathrm{top}} z})$ on mode $d - 1$, and $\psi_m(\operatorname{emb}_0(1))$ elsewhere gives $|\beta_{\mathrm{top}} z|^2 > 0$ for every $z \in \C \setminus \{0\}$ (since $2 q_{\mathrm{top}} \ge c_{\C}(k_0)$ kills all top-degree cross-terms). Testing $z = 1$ and $z = w_1 \in \ker(\ell_{n_1,j} \circ \operatorname{emb}_{\mathrm{top}}) \setminus \{0\}$ kills $2$ distinct terms per mode---$2(d - 1)$ terms across modes $0, \dots, d - 2$---after which low-degree truncation on modes $0, \dots, d - 2$ and $+1$ index shifting on mode $d - 1$ reduce $c_{\C}(k_0) \mapsto c_{\C}(k_0) - 1$ with shifted top weight $\beta_{\mathrm{top}} \ne 0$.
 \end{enumerate}
 
-\begin{theorem}[$d$-D Real Multi-Gaussian Rank, \leanid{separableRank\_radial\_gaussian\_profile}]\label{thm:real_gaussian}
-Let $d \ge 2$ and let $\mathrm{cs}$ be a Gaussian representation (\leanid{IsGaussianRepresentation}) with $r$ real rates and $c$ nonreal upper-half-plane rates. Then
-\[
-  \srank\!\left(x \in \R^d \mapsto \mathrm{profile}\!\left(\mathrm{cs},\, \sum_{j=0}^{d-1} x_j^2\right)\right)
-  = \mathrm{gaussianTotalCost}(d, \mathrm{cs}) = r + d c.
-\]
-\end{theorem}
-
-\begin{corollary}[Failure of real-to-complex rank invariance for $d \ge 3$]
-For every $d \ge 3$, the real radial kernel $K(x) = \RePart\!\bigl(\exp(i\sum_{j=0}^{d-1} x_j^2)\bigr)$ on $\R^d$ satisfies $\srank_{\R}(K) = d$ by Theorem~\ref{thm:real_gaussian} ($r = 0, c = 1$), whereas its complexification $K_{\C}(x) = \frac{1}{2}e^{i\|x\|^2} + \frac{1}{2}e^{-i\|x\|^2}$ satisfies $\srank_{\C}(K_{\C}) = 2$ by Theorem~\ref{thm:complex_nd}.
-\end{corollary}
-
-In two dimensions ($d = 2$), real-to-complex scalar extension preserves rank unconditionally (\leanid{separableRank\_ofReal}), yielding exact real ranks for arbitrary polynomial degrees alongside the minimal differential-annihilator theorem:
-
-\begin{theorem}[2-D Exact Real Rank, \leanid{separableRank\_radial\_eq\_iff}]\label{thm:real_2d}
-Let $\varphi : \R \to \R$ be continuous on $[0,\infty)$. For every $N \in \N$,
+\begin{theorem}[Exact $d$-D Real Radial Rank, \leanid{separableRank\_radial\_eq\_iff}]\label{thm:real_nd}
+Let $d \ge 2$ and let $\varphi : \R \to \R$ be continuous on $[0,\infty)$. For every $N \in \N$,
 \begin{align*}
-  &\srank\!\left(x \in \R^2 \mapsto \varphi(x_0^2 + x_1^2)\right) = N\\
-  &\qquad\iff \exists\,\mathrm{cs},\ \operatorname{IsRepresentation}(\mathrm{cs})
+  &\srank\!\left(x \in \R^d \mapsto \varphi\!\left(\sum_{j=0}^{d-1} x_j^2\right)\right) = N\\
+  &\iff \exists\,\mathrm{cs},\ \operatorname{IsRepresentation}(\mathrm{cs})
     \wedge (\forall s \ge 0,\ \varphi(s) = \mathrm{profile}(\mathrm{cs}, s))
-    \wedge \mathrm{totalCost}(\mathrm{cs}) = N.
+    \wedge \mathrm{multiTotalCost}(d, \mathrm{cs}) = N.
 \end{align*}
+In particular, for a Gaussian representation with $r$ real and $c$ nonreal rates, $\srank = r + d c$ (\leanid{separableRank\_radial\_gaussian\_profile}), and in $d = 2$, $\srank = \mathrm{totalCost}(\mathrm{cs})$ (\leanid{separableRank\_radial\_two\_eq\_iff}).
 \end{theorem}
 
 \begin{theorem}[Minimal Differential Annihilator]\label{thm:annihilator}
 Let $\varphi : \R \to \R$ be continuous on $[0,\infty)$ with finite-dimensional translate span and two-dimensional radial rank $\srank(x \in \R^2 \mapsto \varphi(x_0^2 + x_1^2)) = N < \infty$ (\leanid{exists\_minimal\_differential\_annihilator}). There exists a monic polynomial $p \in \C[X]$ of degree $N$ such that for every $q \in \C[X]$, the half-line differential equation $q(D)\varphi_{\C} = 0$ holds on $[0,\infty)$ (where $\varphi_{\C}(s) = (\varphi(s) : \C)$) if and only if $p \mid q$.
 \end{theorem}
 
-\begin{remark}[Open problem for $d \ge 3$ and $\deg P \ge 1$ over $\R$]
-While Theorem~\ref{thm:classification} characterizes finiteness for all polynomial degrees and Theorem~\ref{thm:complex_nd} determines the exact complex $d$-way rank $\sum_\mu ((d-1)\deg P_\mu + 1)$ for all degrees, determining the exact \emph{real} $d$-way rank when $d \ge 3$ and $\deg P_i \ge 1$ for nonreal rates reduces to the real symmetric/Hankel tensor rank of $\RePart(P(\sum_j s_j)e^{\lambda\sum_j s_j})$, where real Waring ranks depend delicately on root configurations and exceed complex ranks.
-\end{remark}
+\paragraph{Worked example ($d = 3, \deg P = 1$): exact rank vs.\ complex rank and border rank.}
+Consider $K(x_0, x_1, x_2) = (x_0^2 + x_1^2 + x_2^2)\cos(x_0^2 + x_1^2 + x_2^2)$ on $\R^3$, a single well-formed component $P(s) = s$, $\lambda = i$ ($\deg P = 1, \ImPart\lambda = 1 > 0$):
+\begin{itemize}[leftmargin=1.6em,itemsep=2pt]
+  \item \emph{Complex rank $= 6$:} Over $\C$, $K_{\C}$ splits into $\frac{1}{2}s e^{is} + \frac{1}{2}s e^{-is}$, giving exact complex 3-way rank $((3-1)\cdot 1 + 1) + ((3-1)\cdot 1 + 1) = 6$ by Theorem~\ref{thm:complex_nd}.
+  \item \emph{Pointwise limit of rank-$6$ kernels (border rank $\le 6$):} As an unformalized analytical contrast, for every $h > 0$ the difference quotient $\frac{1}{h}\bigl[\RePart\prod_{j=0}^2 (1 + h x_j^2)e^{i x_j^2} - \RePart\prod_{j=0}^2 e^{i x_j^2}\bigr]$ converges pointwise (and uniformly on compact sets) to $K(x)$ as $h \to 0$, and by Proposition~\ref{prop:roots} each $\RePart(\prod_{j=0}^2 \cdots)$ uses $3$ real 3-way products, totaling $3 + 3 = 6$ real products at every $h > 0$ with diverging $O(h^{-1})$ weights.
+  \item \emph{Exact real rank $= 7$:} By Theorem~\ref{thm:real_nd}, $\srank_{\R}(K) = 2(3 - 1)\cdot 1 + 3 = 7$ (achieved with bounded weights by Proposition~\ref{prop:poly_roots} at $R = 7$, vs.\ $9$ from naive \leanid{IsSumOfProducts.re}). To see why $6$ terms cannot represent $K$ exactly, pass to $W = \C[T]/(T^2) \cong \C \oplus \C\varepsilon$ ($\varepsilon^2 = 0$) where $\mathcal{M}(u, v, w) = \RePart(u_1 v_0 w_0 + u_0 v_1 w_0 + u_0 v_0 w_1)$. On $E = 0 \oplus \C\varepsilon \cong \R^2$, the slice $\mathcal{M}((0, z_1), (v_0, 0), (w_0, 0)) = \RePart(z_1 v_0 w_0)$ forces the mode-$0$ functionals $\{\ell_n|_E\}$ to span $E^*$ ($\dim_{\R} E^* = 2$); choosing a basis $\{\ell_0|_E, \ell_1|_E\}$ defines $\psi_0(u_0) = (u_0, c_0(u_0))$ killing $n = 0, 1$. Because $\varepsilon^2 = 0$, $\mathcal{M}(\psi_0(u_0), (0, v_1), (w_0, 0)) = \RePart(u_0 v_1 w_0)$ is unchanged by $c_0$, so the remaining functionals $\{m_n|_E : n \ge 2\}$ on mode $1$ again span $E^*$, killing two more terms $n = 2, 3$ via $\psi_1(v_0) = (v_0, c_1(v_0))$. Finally, $\mathcal{M}(\psi_0(u_0), \psi_1(v_0), (0, w_1)) = \RePart(u_0 v_0 w_1)$ must be represented by the remaining $R - 4$ terms, and \leanid{single\_complex\_rank\_ge} gives $R - 4 \ge 3$, hence $R \ge 7$.
+\end{itemize}
 
 \section{Standard vs.\ Nonstandard Proofs of the Semigroup Step}\label{sec:semigroup}
 
@@ -335,7 +352,7 @@ NSA (star + \texttt{transfer}) & Isabelle (\texttt{Semigroup\_NSA.thy}) & 275 & 
 \end{tabular}}
 \end{table}
 
-Table~\ref{tab:semigroup} summarizes the exact line counts. Although the homogeneous-scale nonstandard proof uses no integration and only elementary algebra, \emph{integral smoothing remains both the shortest ($96$ lines) and the only infinite-dimensional proof}, because Mathlib provides Bochner integration and the fundamental theorem of calculus as off-the-shelf library theorems. Even discounting the $195$-line interface \leanid{Ultrapower.lean} as reusable library code, the nonstandard-language Lean proof ($169 + 35 = 204$ lines) merely matches the direct ultrafilter proof ($206$ lines): without automated transfer, nonstandard vocabulary in Lean just wraps filter limits. In Isabelle/HOL, \texttt{transfer} genuinely compresses hypernatural induction, but $59$ lines of missing library lemmas (Heine--Borel vector standard parts and half-line continuity via $M(\max(t,0))$) plus stating transferred formulas at both standard and nonstandard types keep the total at $275$ lines.
+Table~\ref{tab:semigroup} summarizes the exact line counts. These numbers reflect \emph{library amortization} rather than intrinsic proof complexity: \leanid{Semigroup.lean} ($96$ lines) is shortest and holds in every Banach algebra because Mathlib amortizes thousands of lines of Bochner integration, Neumann series, and the fundamental theorem of calculus behind compact API lemmas, whereas compactness-based proofs are inherently finite-dimensional. Across different proof styles within Lean, the $2\times$ gap between integral smoothing ($96$ lines) and ultrafilter sequences ($206$ lines) remained stable even after eliminating the $124$-line difference-quotient bound via homogeneous coordinates~\eqref{eq:eta}. Moreover, discounting the $195$-line interface \leanid{Ultrapower.lean} as reusable library code leaves $169 + 35 = 204$ lines: without automated transfer, nonstandard vocabulary in Lean merely wraps filter limits. In Isabelle/HOL, \texttt{transfer} genuinely compresses hypernatural induction, but $59$ lines of local library gaps (Heine--Borel vector standard parts and half-line continuity via $M(\max(t,0))$) plus stating transferred formulas at both standard and nonstandard types keep the total at $275$ lines.
 
 \section{Applications to Isotropic and Steerable Filtering and 3-D Propagation}\label{sec:applications}
 
@@ -373,39 +390,59 @@ In applications such as orientation estimation~\cite{niemitalo2019angle}, one ev
 \end{align*}
 Because $C_m$ and $S_m$ on $\R^2$ span all powers $\{x^0,\dots,x^m\}g_n(x)$ in $x$ and $\{y^0,\dots,y^m\}g_n(y)$ in $y$ (for $m = 1$, $h_x$ is odd-in-$x$/even-in-$y$ while $h_y$ is even-in-$x$/odd-in-$y$), adding the two inequalities proves that \emph{every} two-stage continuous 1-D schedule requires at least $(m+1)R + (m+1)R = 2(m+1)R$ passes ($4R$ passes for $(h_x, h_y)$). Savings instead arise in three ways: (i)~definite even/odd parity of every 1-D factor $u^k g_n(u)$ halves the multiplications per sampled pass via $I[y+\ell] \pm I[y-\ell]$ folding while fusing input loads; (ii)~across \emph{multiple} harmonic orders $m = 0,\dots,M$, vertical passes $\{I *_y (y^k g_n)\}_{k=0}^M$ are shared linearly ($5R$ passes instead of $6R$ for low-pass plus gradient; $10R$ instead of $12R$ for $m = 1$ plus $m = 3$); and (iii)~for the $d$-dimensional gradient $(h_{x_0},\dots,h_{x_{d-1}})$ of a multi-Gaussian radial kernel of $d$-way rank $R_d = r + d c$ ($d \ge 3$), recursively splitting $\{0,\dots,d-1\}$ into halves of sizes $\lfloor d/2\rfloor$ and $\lceil d/2\rceil$ and pre-convolving each half with the undifferentiated factors reduces $d^2 R_d$ passes to $T(d) R_d$ with $T(1) = 1$ and $T(d) = T(\lfloor d/2\rfloor) + T(\lceil d/2\rceil) + d \le d(\lceil \log_2 d \rceil + 1)$ ($8R_3$ vs.\ $9R_3$ in $d = 3$; $12R_4$ vs.\ $16R_4$ in $d = 4$).
 
-\subsection{Three-dimensional filtering and band-limited wave propagation}
+\subsection{Three-dimensional filtering, wave propagation, and concrete operation counts}
 
-In three dimensions ($d = 3$), direct spatial convolution with an $L \times L \times L$ isotropic kernel---such as a cryo-EM/tomography bandpass filter or a coarse-grid dispersion-free time-step propagator for the band-limited constant-speed acoustic wave equation, whose spatial-frequency symbol depends radially on $\|\xi\|^2$---scales as $L^3$ per voxel. Approximating the radial profile by $r$ real and $c$ complex-conjugate Gaussians yields exact real 3-way separable rank $r + 3c$ by Theorem~\ref{thm:real_gaussian}: Proposition~\ref{prop:roots} realizes each complex Gaussian in $3$ real 3-way terms ($9$ real 1-D passes on real-valued volume buffers, vs.\ $2^{3-1} = 4$ terms / $12$ passes from naive real-and-imaginary expansion), and certifies that no real 3-way factorization uses fewer than $r + 3c$ terms.
+In three dimensions ($d = 3$), direct spatial convolution with an $L \times L \times L$ isotropic kernel---such as a cryo-EM/tomography bandpass filter or a coarse-grid dispersion-free time-step propagator for the band-limited constant-speed acoustic wave equation, whose spatial-frequency symbol depends radially on $\|\xi\|^2$---scales as $L^3$ per voxel. Approximating the radial profile by $r$ real and $c$ complex-conjugate Gaussians yields exact real 3-way separable rank $r + 3c$ by Theorem~\ref{thm:real_nd}: Proposition~\ref{prop:roots} realizes each complex Gaussian in $3$ real 3-way terms ($9$ real 1-D passes on real-valued volume buffers, vs.\ $2^{3-1} = 4$ terms / $12$ passes from naive real-and-imaginary expansion), and polynomial-oscillatory shells ($\deg P = 1$) take $7$ rather than $9$ real 3-way terms via Proposition~\ref{prop:poly_roots}.
+
+\begin{table}[t]
+\centering
+\caption{Comparison of exact continuous-domain real separable rank $R$, 1-D passes, and scalar multiply--adds per output sample ($d R L$) against direct spatial convolution ($L^d$) and naive real-part expansion at tap widths $L = 41$ and $L = 161$ (from~\cite{niemitalo2019angle}).}\label{tab:examples}
+\smallskip
+{\footnotesize\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Kernel family & Params & Direct ($41 / 161$) & Naive & Exact $R$ & Passes & Ops ($41 / 161$) \\
+\midrule
+2-D circular low-pass $W$ & $d{=}2,\,c{=}2$ & $1{,}681$ / $25{,}921$ & $8$ & $4$ & $8$ & $328$ / $1{,}288$ \\
+2-D gradient $(h_x,h_y)$ & $d{=}2,\,m{=}1,\,c{=}2$ & $3{,}362$ / $51{,}842$ & $16$ & $4{+}4$ & $16$ & $656$ / $2{,}576$ \\
+2-D beach ball $(C_3,S_3)$ & $d{=}2,\,m{=}3,\,c{=}2$ & $3{,}362$ / $51{,}842$ & $32$ & $8{+}8$ & $32$ ($40^*$) & $1{,}312$ / $5{,}152$ \\
+3-D Gaussian prop. & $d{=}3,\,r{=}1,\,c{=}2$ & $68{,}921$ / $4.17{\times}10^6$ & $27$ & $7$ & $21$ & $861$ / $3{,}381$ \\
+3-D osc.\ shell ($\deg{=}1$) & $d{=}3,\,\deg{=}1,\,c{=}1$ & $68{,}921$ / $4.17{\times}10^6$ & $27$ & $7$ & $21$ & $861$ / $3{,}381$ \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Table~\ref{tab:examples} illustrates concrete operation counts (before an additional $2\times$ reduction in scalar multiplications from even/odd tap-parity folding; $40^*$ denotes the combined pass count for $m = 1$ plus $m = 3$, vs.\ $48$ unshared). On the $N = 161$ ($\omega_c = \pi/64$) orientation-estimation benchmark of~\cite{niemitalo2019angle}, replacing direct $2 \times 161^2$ spatial convolution by a two-complex-Gaussian analytical gradient pair reduces arithmetic by $20\times$ ($40\times$ with tap-parity folding) without full-image 2-D FFT buffers; in 3-D at $L = 41$, the $r + 3c = 7$ decomposition reduces $68{,}921$ taps/voxel to $861$ ($80\times$), saving $22\%$ over naive $1 + 4c = 9$ real/imaginary expansion.
 
 \section{Formalization Architecture and Verification Audit}\label{sec:formalization}
 
 \begin{table}[t]
 \centering
-\caption{Structure and source line counts of the \texttt{KernelRankLean} library (commit \texttt{6aabb4d}).}\label{tab:modules}
+\caption{Structure and source line counts of the \texttt{KernelRankLean} library.}\label{tab:modules}
 \smallskip
 {\small\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{@{}llrr@{}}
 \toprule
 Module(s) & Mathematical content & Phys. & Nonbl. \\
 \midrule
-\texttt{Defs}, \texttt{KernelRankLean} & Multi-way rank, surjections, slices, costs & 183 & 156 \\
+\texttt{Defs}, \texttt{KernelRankLean} & Multi-way rank, surjections, slices, costs & 213 & 180 \\
 \texttt{RowSpan}, \texttt{Complexification} & 2-way row-span rank; $\R \to \C$ invariance & 221 & 189 \\
 \texttt{Translations} & $d$-D radial-to-Hankel reduction; \texttt{translateSpan} & 92 & 80 \\
 \texttt{ExpPoly}, \texttt{RealExpPoly} & Exponential-polynomial uniqueness & 198 & 170 \\
 \texttt{Semigroup}, \texttt{TranslationSemigroup} & Banach semigroups; shift semigroup & 262 & 219 \\
 \texttt{Necessity}, \texttt{Representation} & Generalized eigenvectors; conjugate pairing & 222 & 198 \\
 \texttt{Differential}, \texttt{ComplexRank} & Half-line operators $q(D)$; 2-D complex rank & 318 & 284 \\
-\texttt{Sufficiency}, \texttt{Annihilator} & 2-D real sufficiency; minimal annihilator & 196 & 181 \\
-\texttt{MultiComplexRank} & Exact $d$-way complex rank $\sum_i ((d-1)\deg P_i + 1)$ & 1,008 & 972 \\
-\texttt{MultiGaussian} & $2d$-th root identity; exact real rank $r + d c$ & 978 & 955 \\
-\texttt{Main} & Unified $d$-D and 2-D main theorems & 144 & 133 \\
+\texttt{Annihilator} & Minimal constant-coefficient annihilator & 69 & 62 \\
+\texttt{MultiComplexRank} & Exact $d$-way complex rank $\sum_i ((d-1)\deg P_i + 1)$ & 1,015 & 978 \\
+\texttt{MultiRealRank} & Exact $d$-way real rank (\texttt{multiTotalCost}) & 2,562 & 2,521 \\
+\texttt{Main} & Unified $d$-D and 2-D main theorems & 152 & 140 \\
 \midrule
-\textbf{Total (\texttt{KernelRankLean})} & & \textbf{3,822} & \textbf{3,537} \\
+\textbf{Total (\texttt{KernelRankLean})} & & \textbf{5,324} & \textbf{5,021} \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-Table~\ref{tab:modules} breaks down the \texttt{KernelRankLean} library ($3{,}822$ physical lines, $3{,}537$ nonblank lines; the 2-D classification and differential-annihilator suite prior to the $d$-dimensional tensor-rank modules comprised $1{,}587$ physical lines at commit \texttt{cae13d6}, and $1{,}340$ physical lines at commit \texttt{240dea0} prior to differential annihilators). Three formalization choices proved decisive in Lean~4:
+Table~\ref{tab:modules} breaks down the \texttt{KernelRankLean} library ($5{,}324$ physical lines, $5{,}021$ nonblank lines; earlier stages comprised $3{,}822$ physical lines at commit \texttt{6aabb4d} for $d$-D complex and multi-Gaussian ranks, $1{,}587$ lines at commit \texttt{cae13d6} for 2-D plus differential annihilators, and $1{,}340$ lines at commit \texttt{240dea0} for 2-D classification alone). Three formalization choices proved decisive in Lean~4:
 
 \begin{enumerate}[leftmargin=2em,itemsep=2pt]
   \item \textbf{Dependent multi-way definitions with homogeneous two-coordinate specialization:} Defining \leanid{IsSumOfProducts} and \leanid{separableRank} over a general dependent family $\prod_{i \in \iota} X_i$ unifies 2-D and $d$-D statements, whereas specializing \leanid{rowSpan} in \leanid{RowSpan.lean} to homogeneous $\operatorname{Fin} 2 \to \alpha$ (with a pattern-matched constructor \leanid{fin2Vec}) avoids expensive higher-order unification timeouts when rewriting on $\operatorname{Fin} 2 \to \Rnn$.
@@ -414,23 +451,43 @@ Table~\ref{tab:modules} breaks down the \texttt{KernelRankLean} library ($3{,}82
 \end{enumerate}
 
 \paragraph{Verification audit.}
-A single script (\texttt{scripts/check}, also wired as the repository's pre-commit hook) builds both \texttt{KernelRankLean} and \texttt{Experiments} via \texttt{lake build} (which includes every \texttt{.lean} module in the repository), checks the compiler log to ensure no declaration uses \texttt{sorry}, runs \texttt{\#print axioms} on $14$ top-level theorems to confirm dependence solely on Lean's three standard classical axioms (\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}), builds the Isabelle2026 session \leanid{KernelRank\_NSA}, and audits \texttt{Semigroup\_NSA.}\allowbreak\leanid{semigroup\_eq\_exp} via \leanid{Thm\_Deps.all\_oracles} (catching \leanid{skip\_proof}/\texttt{sorry} even under \leanid{quick\_and\_dirty}) while rejecting any \texttt{axiomatization} or \texttt{axioms} declarations.
+A single script (\texttt{scripts/check}, also wired as the repository's pre-commit hook) builds both \texttt{KernelRankLean} and \texttt{Experiments} via \texttt{lake build} (which includes every \texttt{.lean} module in the repository), checks the compiler log to ensure no declaration uses \texttt{sorry}, runs \texttt{\#print axioms} on $17$ top-level theorems to confirm dependence solely on Lean's three standard classical axioms (\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}), builds the Isabelle2026 session \leanid{KernelRank\_NSA}, and audits \texttt{Semigroup\_NSA.}\allowbreak\leanid{semigroup\_eq\_exp} via \leanid{Thm\_Deps.all\_oracles} (catching \leanid{skip\_proof}/\texttt{sorry} even under \leanid{quick\_and\_dirty}) while rejecting any \texttt{axiomatization} or \texttt{axioms} declarations.
 
 \section*{Acknowledgments}
 
-This work builds directly on problems, mathematical formulations, and software developed by Olli Niemitalo, including \texttt{kernel-optimizer}~\cite{niemitalo_kernel_optimizer} for complex-Gaussian approximations of 2-D circularly symmetric blur kernels and his investigations of isotropic low-pass filters, steerable gradient orientation estimation, and planar harmonic differential operators~\cite{niemitalo2019angle,niemitalo2019beachball,niemitalo2019lowpass}. Olli Niemitalo initiated and guided the \texttt{kernel-rank-lean} repository, proposed comparing standard and Isabelle/HOL nonstandard proofs of the semigroup step, and suggested extending the formalization to $d$ dimensions.
+This work builds directly on problems, mathematical formulations, and software developed by Olli Niemitalo, including \texttt{kernel-optimizer}~\cite{niemitalo_kernel_optimizer} for complex-Gaussian approximations of 2-D circularly symmetric blur kernels and his investigations of isotropic low-pass filters, steerable gradient orientation estimation, and planar harmonic differential operators~\cite{niemitalo2019angle,niemitalo2019beachball,niemitalo2019lowpass}. Olli Niemitalo initiated and guided the \texttt{kernel-rank-lean} repository, proposed comparing standard and Isabelle/HOL nonstandard proofs of the semigroup step, and suggested extending the formalization to $d$ dimensions. We also thank the aiXiv Official Agent reviewer on version~1.0, whose question regarding higher-degree real polynomial profiles in $d \ge 3$ directly motivated Theorem~\ref{thm:real_nd} and Proposition~\ref{prop:poly_roots}. Both the repository and this manuscript are released under CC0~1.0 Universal.
 
-\begin{thebibliography}{9}
+\begin{thebibliography}{99}
 
 \bibitem{alder1981alg}
 A.~Alder and V.~Strassen,
 ``On the algorithmic complexity of associative algebras,''
 \emph{Theoretical Computer Science} \textbf{15}(2), 201--211 (1981).
 
+\bibitem{beylkin2005exponentials}
+G.~Beylkin and L.~Monz\'on,
+``On approximation of functions by exponential sums,''
+\emph{Applied and Computational Harmonic Analysis} \textbf{19}(1), 17--48 (2005).
+
+\bibitem{comon1996decomposition}
+P.~Comon and B.~Mourrain,
+``Decomposition of quantics in sums of powers of linear forms,''
+\emph{Signal Processing} \textbf{53}(2--3), 93--107 (1996).
+
+\bibitem{fleuriot2000mechanizing}
+J.~D.~Fleuriot,
+``On the mechanization of real analysis in Isabelle/HOL,''
+in \emph{Theorem Proving in Higher Order Logics (TPHOLs 2000)}, LNCS \textbf{1869}, pp.~145--161 (2000).
+
 \bibitem{freeman1991steerable}
 W.~T.~Freeman and E.~H.~Adelson,
 ``The design and use of steerable filters,''
 \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence} \textbf{13}(9), 891--906 (1991).
+
+\bibitem{holzl2013type}
+J.~H\"olzl, F.~Immler, and B.~Huffman,
+``Type classes and filters for mathematical analysis in Isabelle/HOL,''
+in \emph{Interactive Theorem Proving (ITP 2013)}, LNCS \textbf{7998}, pp.~279--294 (2013).
 
 \bibitem{koenderink1992generic}
 J.~J.~Koenderink and A.~J.~van~Doorn,
@@ -441,6 +498,11 @@ J.~J.~Koenderink and A.~J.~van~Doorn,
 C.~H.~Lampert and O.~Wirjadi,
 ``An optimal nonorthogonal separation of the anisotropic Gaussian convolution filter,''
 \emph{IEEE Transactions on Image Processing} \textbf{15}(11), 3501--3513 (2006).
+
+\bibitem{landsberg2012tensors}
+J.~M.~Landsberg,
+\emph{Tensors: Geometry and Applications},
+Graduate Studies in Mathematics \textbf{128}, American Mathematical Society (2012).
 
 \bibitem{mathlib2020}
 The mathlib Community,
@@ -474,6 +536,21 @@ GitHub repository, \url{https://github.com/OlliNiemitalo/kernel-optimizer}.
 P.~Perona,
 ``Deformable kernels for early vision,''
 \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence} \textbf{17}(5), 488--499 (1995).
+
+\bibitem{qi2016semialgebraic}
+Y.~Qi, P.~Comon, and L.-H.~Lim,
+``Semialgebraic geometry of nonnegative tensor rank,''
+\emph{SIAM Journal on Matrix Analysis and Applications} \textbf{37}(4), 1556--1580 (2016).
+
+\bibitem{reznick2013length}
+B.~Reznick,
+``On the length of binary forms,''
+in \emph{ Quadratic and Higher Degree Forms}, Developments in Mathematics \textbf{31}, pp.~207--232 (2013).
+
+\bibitem{schoenberg1938metric}
+I.~J.~Schoenberg,
+``Metric spaces and completely monotone functions,''
+\emph{Annals of Mathematics} \textbf{39}(4), 811--841 (1938).
 
 \bibitem{unser2013steerable}
 M.~Unser and N.~Chenouard,

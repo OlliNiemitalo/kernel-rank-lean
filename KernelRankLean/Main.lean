@@ -1,7 +1,6 @@
-import KernelRankLean.Sufficiency
 import KernelRankLean.Necessity
 import KernelRankLean.MultiComplexRank
-import KernelRankLean.MultiGaussian
+import KernelRankLean.MultiRealRank
 
 /-!
 # Main theorems
@@ -12,18 +11,16 @@ For any dimension `d ≥ 2`:
   kernel `x ↦ φ (∑ j, x j ^ 2)` on `ℝ^d`, with `φ` continuous on `[0, ∞)`, has finite `d`-way
   separable rank if and only if `φ` is, on `[0, ∞)`, the profile of an exponential-polynomial
   representation.
-* **Exact `d`-D complex radial rank (`separableRank_radial_complex_eq_iff`):** a complex
-  circularly symmetric kernel `x ↦ ψ (∑ j, x j ^ 2)` on `ℝ^d`, with `ψ` continuous on `[0, ∞)`,
-  has `d`-way separable rank `N` if and only if `ψ` is, on `[0, ∞)`, a sum of nonzero complex
-  exponential polynomials `P_μ(s) exp(μ s)` at distinct rates `μ` with
+* **Exact `d`-D real radial rank (`separableRank_radial_eq_iff`):** a continuous real radial
+  kernel on `ℝ^d` has `d`-way separable rank `N` if and only if `φ` agrees on `[0, ∞)` with a
+  representation of `multiTotalCost d cs = N` (`(d - 1) * deg P + 1` per real rate and
+  `2 * (d - 1) * deg P + d` per nonreal conjugate-pair rate). Specializing to `deg P = 0` gives
+  `gaussianTotalCost d cs = r + d * c` (`separableRank_radial_gaussian_eq_iff`), and specializing
+  to `d = 2` gives `totalCost cs = N` (`separableRank_radial_two_eq_iff`).
+* **Exact `d`-D complex radial rank (`separableRank_radial_complex_eq_iff`):** a continuous
+  complex radial kernel on `ℝ^d` has `d`-way separable rank `N` if and only if `ψ` agrees on
+  `[0, ∞)` with a sum of nonzero complex exponential polynomials at distinct rates with
   `∑ μ, ((d - 1) * deg P_μ + 1) = N`.
-* **Exact `d`-D real multi-Gaussian rank (`separableRank_radial_gaussian_profile`,
-  `separableRank_radial_gaussian_eq_iff`):** a pure multi-Gaussian representation with `r` real
-  rates and `c` conjugate-pair rates has exact `d`-way real radial rank
-  `gaussianTotalCost d cs = r + d * c`.
-* **Exact 2-D real rank (`separableRank_radial_eq_iff`):** in `d = 2`, a continuous real radial
-  kernel has separable rank `N` if and only if `φ` is, on `[0, ∞)`, a sum of components with
-  distinct rates and `totalCost cs = N`.
 -/
 
 open Complex Polynomial
@@ -50,7 +47,35 @@ theorem separableRank_radial_lt_top_iff_exists {d : ℕ} (hd : 2 ≤ d)
     exact exists_representation_of_finiteDimensional φ hφ
   · rintro ⟨cs, _hcs, hφcs⟩
     rw [radial_congr hφcs]
-    exact separableRank_radial_profile_lt_top (by omega) cs
+    exact separableRank_radial_profile_lt_top hd cs
+
+/-- **Exact `d`-D real radial rank (`d ≥ 2`).** A real radial kernel on `ℝ^d`, with profile
+continuous on `[0, ∞)`, has `d`-way separable rank `N` if and only if its profile is, on
+`[0, ∞)`, a sum of components with distinct rates costing `multiTotalCost d cs = N` rendering
+terms in total (`(d - 1) * deg P + 1` per real rate and `2 * (d - 1) * deg P + d` per nonreal
+conjugate-pair rate). -/
+theorem separableRank_radial_eq_iff {d : ℕ} (hd : 2 ≤ d)
+    (φ : ℝ → ℝ) (hφ : ContinuousOn φ (Set.Ici 0)) (N : ℕ) :
+    separableRank (fun x : Fin d → ℝ => φ (∑ j, x j ^ 2)) = N ↔
+      ∃ cs : List Component, IsRepresentation cs ∧
+        (∀ s, 0 ≤ s → φ s = profile cs s) ∧ multiTotalCost d cs = N := by
+  constructor
+  · intro h
+    obtain ⟨cs, hcs, hφcs⟩ :=
+      (separableRank_radial_lt_top_iff_exists hd φ hφ).mp (by rw [h]; simp)
+    refine ⟨cs, hcs, hφcs, ?_⟩
+    rw [radial_congr hφcs, separableRank_radial_profile hd hcs] at h
+    exact_mod_cast h
+  · rintro ⟨cs, hcs, hφcs, rfl⟩
+    rw [radial_congr hφcs, separableRank_radial_profile hd hcs]
+
+/-- **Exact 2-D real radial rank.** Specialization of `separableRank_radial_eq_iff` to `d = 2`,
+where `multiTotalCost 2 cs = totalCost cs`. -/
+theorem separableRank_radial_two_eq_iff (φ : ℝ → ℝ) (hφ : ContinuousOn φ (Set.Ici 0)) (N : ℕ) :
+    separableRank (fun x : Fin 2 → ℝ => φ (∑ j, x j ^ 2)) = N ↔
+      ∃ cs : List Component, IsRepresentation cs ∧
+        (∀ s, 0 ≤ s → φ s = profile cs s) ∧ totalCost cs = N := by
+  simpa only [multiTotalCost_two] using separableRank_radial_eq_iff (le_refl 2) φ hφ N
 
 open scoped Classical in
 /-- **Exact `d`-D complex radial rank (`d ≥ 2`).** A complex radial kernel on `ℝ^d`, with profile
@@ -123,22 +148,5 @@ theorem separableRank_radial_gaussian_eq_iff {d : ℕ} (hd : 2 ≤ d) (φ : ℝ 
     exact_mod_cast h
   · rintro ⟨cs, hcs, hφcs, rfl⟩
     rw [radial_congr hφcs, separableRank_radial_gaussian_profile hd hcs]
-
-/-- **Exact 2-D real radial rank.** A two-dimensional real radial kernel, with profile continuous
-on `[0, ∞)`, has separable rank `N` if and only if its profile is, on `[0, ∞)`, a sum of
-components with distinct rates costing `N` rendering terms in total. -/
-theorem separableRank_radial_eq_iff (φ : ℝ → ℝ) (hφ : ContinuousOn φ (Set.Ici 0)) (N : ℕ) :
-    separableRank (fun x : Fin 2 → ℝ => φ (∑ j, x j ^ 2)) = N ↔
-      ∃ cs : List Component, IsRepresentation cs ∧
-        (∀ s, 0 ≤ s → φ s = profile cs s) ∧ totalCost cs = N := by
-  constructor
-  · intro h
-    obtain ⟨cs, hcs, hφcs⟩ :=
-      (separableRank_radial_lt_top_iff_exists (le_refl 2) φ hφ).mp (by rw [h]; simp)
-    refine ⟨cs, hcs, hφcs, ?_⟩
-    rw [radial_congr hφcs, separableRank_radial_two_profile hcs] at h
-    exact_mod_cast h
-  · rintro ⟨cs, hcs, hφcs, rfl⟩
-    rw [radial_congr hφcs, separableRank_radial_two_profile hcs]
 
 end KernelRank

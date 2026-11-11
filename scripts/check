@@ -21,12 +21,15 @@ isabelle_inputs=(Isabelle/ROOT 'Isabelle/*.thy' scripts/isabelle)
 # Theorems whose axioms must be exactly the standard ones.
 lean_theorems=(
   KernelRank.separableRank_radial_lt_top_iff_exists
+  KernelRank.separableRank_radial_eq_iff
+  KernelRank.separableRank_radial_two_eq_iff
   KernelRank.separableRank_radial_complex_eq_iff
+  KernelRank.separableRank_radial_profile
   KernelRank.separableRank_radial_gaussian_profile
   KernelRank.separableRank_radial_gaussian_eq_iff
-  KernelRank.separableRank_radial_eq_iff
   KernelRank.separableRank_sum_expPoly
   KernelRank.separableRank_radial_sum_expPoly
+  KernelRank.re_coeff_prod_eq_sum_re
   KernelRank.exists_minimal_differential_annihilator
   KernelRank.exists_translation_generator
   Experiments.exists_eq_exp_of_semigroup_finiteDifference

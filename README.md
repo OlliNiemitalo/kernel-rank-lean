@@ -37,31 +37,29 @@ and any dimension `d ≥ 2`:
    polynomial ring `ℂ[T] / (T^(m + 1))`, and flattened matricization together with
    Alder–Strassen substitution proves the matching lower bound (`MultiComplexRank.lean`).
 
-3. **Exact `d`-D real multi-Gaussian rank (`KernelRank.separableRank_radial_gaussian_profile`,
-   `KernelRank.separableRank_radial_gaussian_eq_iff`):** when every component has constant
-   polynomial (`IsGaussianRepresentation cs`), a real rate (`Im λ = 0`) costs `1` real `d`-way
-   product and a nonreal conjugate-pair rate (`Im λ > 0`) costs `d` real `d`-way products, so
-   with `r` real rates and `c` nonreal rates (`gaussianTotalCost d cs = r + d * c`),
+3. **Exact `d`-D real radial rank (`KernelRank.separableRank_radial_eq_iff`):** in dimension
+   `d ≥ 2`, a component of polynomial degree `k = deg P` costs `(d - 1) k + 1` real `d`-way
+   products for a real rate (`Im λ = 0`) and `2 (d - 1) k + d` real `d`-way products for a
+   nonreal conjugate-pair rate (`Im λ > 0`), summed in `multiTotalCost d cs`:
    ```lean
-   separableRank (fun x : Fin d → ℝ => profile cs (∑ j, x j ^ 2)) = gaussianTotalCost d cs
-   ```
-   Each nonreal Gaussian splits into `d` real `d`-way products (not `2^(d - 1)`) via the
-   alternating root-of-unity identity
-   $$\operatorname{Re}\!\left(\prod_{j=0}^{d-1} z_j\right) = \frac{2^{d-1}}{d}\sum_{m=0}^{d-1} (-1)^m \prod_{j=0}^{d-1} \operatorname{Re}\!\left(z_j e^{-i\pi m/d}\right),$$
-   and Alder–Strassen substitution over `ℝ` proves that `r + d * c` terms are necessary
-   (`MultiGaussian.lean`). In particular, for `d ≥ 3` a single nonreal Gaussian `Re(exp(i ‖x‖²))`
-   has complex rank `2` (`d - 1` does not appear because `deg P = 0`, while `exp(i ‖x‖²)` and
-   `exp(-i ‖x‖²)` are two complex terms) and real rank `d`, so complexification can strictly
-   lower `d`-way rank in dimension three and above.
-
-4. **Exact 2-D real radial rank (`KernelRank.separableRank_radial_eq_iff`):** in `d = 2`, a
-   degree-`(m - 1)` component costs `m` terms for real `λ` and `2 m` terms for nonreal `λ`
-   (`totalCost cs`), and
-   ```lean
-   separableRank (fun x : Fin 2 → ℝ => φ (∑ j, x j ^ 2)) = N ↔
+   separableRank (fun x : Fin d → ℝ => φ (∑ j, x j ^ 2)) = N ↔
      ∃ cs : List Component, IsRepresentation cs ∧
-       (∀ s, 0 ≤ s → φ s = profile cs s) ∧ totalCost cs = N
+       (∀ s, 0 ≤ s → φ s = profile cs s) ∧ multiTotalCost d cs = N
    ```
+   Real rates use Lagrange interpolation over `ℝ` at `(d - 1) k + 1` real nodes, while nonreal
+   rates use the alternating root-of-unity polynomial-product identity (`re_coeff_prod_eq_sum_re`,
+   with `R = 2 (d - 1) k + d` for `d ≥ 2`)
+   $$\mathrm{Re}\!\left([X^k]\prod_{j=0}^{d-1} U_j(X)\right) = \frac{2^{d-1}}{R}\sum_{r=0}^{R-1} (-1)^r \prod_{j=0}^{d-1} \mathrm{Re}\!\left(U_j\!\left(e^{\frac{2\pi i r}{R}}\right) e^{-\frac{i\pi r (2k + 1)}{R}}\right),$$
+   which reduces at `k = 0` (`R = d`, `re_prod_eq_sum_re`) to a `d`-term real product expansion
+   of `Re (∏ j, z_j)` (giving `3` real terms instead of `2^(3 - 1) = 4` in 3-D), and
+   Alder–Strassen degree peeling over `ℝ` proves optimality (`MultiRealRank.lean`). Specializing
+   `multiTotalCost` gives:
+   * **Multi-Gaussian representations (`deg P = 0`, `separableRank_radial_gaussian_profile`,
+     `separableRank_radial_gaussian_eq_iff`):** exact rank `gaussianTotalCost d cs = r + d * c`
+     for `r` real rates and `c` nonreal rates (so `Re(exp(i ‖x‖²))` has complex rank `2` and real
+     rank `d`, showing that complexification strictly lowers `d`-way rank for `d ≥ 3`).
+   * **Two dimensions (`d = 2`, `separableRank_radial_two_eq_iff`):** `multiTotalCost 2 cs =
+     totalCost cs` (`k + 1` for real `λ`, `2 (k + 1)` for nonreal `λ`).
 
 The proof in the `KernelRankLean` library is complete (no `sorry`); `#print axioms` reports
 only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library and the
@@ -71,9 +69,7 @@ only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` 
 In two coordinates (`Fin 2 → α`), separable rank equals the dimension of the row span over any
 field (`RowSpan.lean`), and `separableRank_ofReal` shows that allowing complex factors does not
 lower the 2-way rank of a real-valued kernel, including when its rank is infinite
-(`separableRank_ofReal_le` gives the one-sided inequality in every dimension). In 2-D, the real
-sufficiency proof expands each nonreal component into a conjugate pair, uses the 2-D complex
-rank formula `∑ i, (deg Pᵢ + 1)`, and descends to `ℝ` by scalar extension.
+(`separableRank_ofReal_le` gives the one-sided inequality in every dimension).
 
 `exists_minimal_differential_annihilator` gives another 2-D characterization for continuous
 finite-rank profiles: there is a monic polynomial `p` whose degree equals the 2-D radial
@@ -155,21 +151,20 @@ The proof is in [KernelRankLean](KernelRankLean):
 
 | File | Content |
 |---|---|
-| `Defs.lean` | Multi-way separable rank, coordinate surjections, 2-D slices, components, 2-D and `d`-D Gaussian costs |
+| `Defs.lean` | Multi-way separable rank, coordinate surjections, 2-D slices, components, `multiTotalCost`, 2-D and Gaussian costs |
 | `RowSpan.lean` | Two-coordinate separable rank = dimension of the span of the rows |
 | `Complexification.lean` | Scalar extension `ℝ → ℂ` bounds multi-way rank and preserves two-coordinate rank |
 | `Translations.lean` | `d`-D radial-to-Hankel equivalence, 2-D slice bound, and `translateSpan` |
 | `ExpPoly.lean`, `RealExpPoly.lean` | Uniqueness and conjugation of exponential polynomials |
 | `ComplexRank.lean` | Product annihilators; 2-D complex translate-span dimension by Taylor expansion and Cayley–Hamilton |
 | `Differential.lean` | Half-line differential operators; Cayley–Hamilton annihilators of exponential orbits |
-| `Sufficiency.lean` | Exact 2-D real rank by conjugate expansion and scalar extension |
 | `Semigroup.lean` | Continuous one-parameter semigroups in a Banach algebra are `exp (t A)` |
 | `TranslationSemigroup.lean` | Shared basis-free exponential realization of translation |
 | `Representation.lean` | Regrouping a real exponential-polynomial sum by conjugate pairs |
 | `Necessity.lean` | A finite-rank radial kernel's profile is a sum of components |
 | `Annihilator.lean` | 2-D rank equals the least constant-coefficient differential-annihilator order |
 | `MultiComplexRank.lean` | Exact `d`-way complex exponential-polynomial rank `∑ i, ((d - 1) deg Pᵢ + 1)` |
-| `MultiGaussian.lean` | Root-of-unity `d`-term real product identity; exact `d`-way real multi-Gaussian rank `r + d * c` |
+| `MultiRealRank.lean` | Root-of-unity & real Lagrange decompositions; exact `d`-way real rank `multiTotalCost d cs` |
 | `Main.lean` | The `d`-D and 2-D main theorems |
 
 Outside the proof:
@@ -205,6 +200,7 @@ size, not mathematical complexity.
 | [`40bfb90`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/40bfb90deb6a25928f07083cb2085605039dfd24) | Add minimal differential annihilators and share the basis-free translation realization | 1,680 | 1,457 | +340 |
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 | [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
+| This revision | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25
@@ -225,15 +221,15 @@ It still has **271 more physical lines than `0d9d939`** (and 247 more than `240d
 Thus it reduces the extended proof, but has not yet made it smaller than the earlier
 classification-only proof.
 
-`6aabb4d` extends `KernelRankLean` from two coordinates to arbitrary dimension `d ≥ 2`:
-[MultiComplexRank.lean](KernelRankLean/MultiComplexRank.lean) (1,008 physical lines) proves the
-exact `d`-way complex exponential-polynomial rank, and
-[MultiGaussian.lean](KernelRankLean/MultiGaussian.lean) (978 physical lines) proves the
-alternating root-of-unity `d`-term real decomposition and the exact `d`-way real multi-Gaussian
-rank `r + d * c`. Including the unified multi-way core, `KernelRankLean` grows to **3,822
-physical lines and 3,537 nonblank lines** (+2,235 physical lines and +2,157 nonblank lines over
-`cae13d6`); this is an extension to `d ≥ 2` and tensor CP-rank lower bounds, not a
-simplification of the 2-D proof.
+`6aabb4d` extends `KernelRankLean` from two coordinates to arbitrary dimension `d ≥ 2` for
+complex exponential polynomials and real multi-Gaussians (3,822 physical lines, 3,537 nonblank).
+This revision replaces both the degree-0-only `MultiGaussian.lean` and `Sufficiency.lean` with
+[MultiRealRank.lean](KernelRankLean/MultiRealRank.lean) (2,562 physical lines), proving the
+exact `d`-way real radial rank `multiTotalCost d cs` for arbitrary polynomial degrees and all
+`d ≥ 2` (`(d - 1) deg P + 1` per real rate and `2 (d - 1) deg P + d` per nonreal rate). This
+brings `KernelRankLean` to **5,324 physical lines and 5,021 nonblank lines** (+1,502 physical
+lines and +1,484 nonblank lines over `6aabb4d`), completing the unconditional `d`-dimensional
+real classification and exact-rank theorem.
 
 ## Alternative proofs of the semigroup step
 
@@ -321,3 +317,7 @@ scripts/isabelle build -d Isabelle KernelRank_NSA
 ```
 
 `lake build` builds both the `KernelRankLean` proof and the `Experiments` library.
+
+## License
+
+Released into the public domain under [CC0 1.0 Universal](LICENSE).

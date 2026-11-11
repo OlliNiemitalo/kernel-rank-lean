@@ -6,10 +6,9 @@ import KernelRankLean.ExpPoly
 import KernelRankLean.RealExpPoly
 import KernelRankLean.Differential
 import KernelRankLean.ComplexRank
-import KernelRankLean.Sufficiency
 import KernelRankLean.TranslationSemigroup
 import KernelRankLean.Necessity
 import KernelRankLean.Annihilator
 import KernelRankLean.MultiComplexRank
-import KernelRankLean.MultiGaussian
+import KernelRankLean.MultiRealRank
 import KernelRankLean.Main

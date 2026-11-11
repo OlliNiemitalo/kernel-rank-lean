@@ -137,6 +137,21 @@ complex rate. -/
 noncomputable def gaussianCost (d : ℕ) (c : Component) : ℕ :=
   if c.rate.im = 0 then 1 else d
 
+/-- Rendering terms of an arbitrary component in `d` dimensions (`d ≥ 2`):
+`(d - 1) * deg P + 1` for a real rate, and `2 * (d - 1) * deg P + d` for a nonreal rate. -/
+noncomputable def multiCost (d : ℕ) (c : Component) : ℕ :=
+  if c.rate.im = 0 then (d - 1) * c.poly.natDegree + 1
+  else 2 * (d - 1) * c.poly.natDegree + d
+
+lemma multiCost_two (c : Component) : c.multiCost 2 = c.cost := by
+  unfold multiCost cost multiplicity
+  split_ifs <;> omega
+
+lemma multiCost_of_isGaussian (d : ℕ) {c : Component} (hg : c.IsGaussian) :
+    c.multiCost d = c.gaussianCost d := by
+  unfold IsGaussian at hg
+  simp [multiCost, gaussianCost, hg]
+
 /-- A well-formed component: a nonzero polynomial, a rate in the closed upper half-plane (a rate
 and its conjugate give the same components), and real coefficients when the rate is real. -/
 def WellFormed (c : Component) : Prop :=
@@ -155,6 +170,22 @@ noncomputable def totalCost (cs : List Component) : ℕ :=
 /-- The total number of `d`-D rendering terms of a list of Gaussian components. -/
 noncomputable def gaussianTotalCost (d : ℕ) (cs : List Component) : ℕ :=
   (cs.map (Component.gaussianCost d)).sum
+
+/-- The total number of `d`-D rendering terms of a list of arbitrary components (`d ≥ 2`). -/
+noncomputable def multiTotalCost (d : ℕ) (cs : List Component) : ℕ :=
+  (cs.map (Component.multiCost d)).sum
+
+lemma multiTotalCost_two (cs : List Component) : multiTotalCost 2 cs = totalCost cs := by
+  unfold multiTotalCost totalCost
+  congr 1
+  exact List.map_congr_left fun c _ => c.multiCost_two
+
+lemma multiTotalCost_of_isGaussian {d : ℕ} {cs : List Component}
+    (hg : ∀ c ∈ cs, c.IsGaussian) :
+    multiTotalCost d cs = gaussianTotalCost d cs := by
+  unfold multiTotalCost gaussianTotalCost
+  congr 1
+  exact List.map_congr_left fun c hc => Component.multiCost_of_isGaussian d (hg c hc)
 
 /-- A representation of a profile: well-formed components with distinct rates. -/
 def IsRepresentation (cs : List Component) : Prop :=

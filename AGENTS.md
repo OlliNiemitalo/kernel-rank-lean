@@ -4,9 +4,10 @@
 
 - `KernelRankLean/` and `KernelRankLean.lean`: the proof of the `d`-dimensional and 2-D
   separable-rank theorems for circularly symmetric kernels (`separableRank_radial_lt_top_iff_exists`,
-  `separableRank_radial_complex_eq_iff`, `separableRank_radial_gaussian_profile`,
-  `separableRank_radial_gaussian_eq_iff`, and `separableRank_radial_eq_iff` in `Main.lean`). It
-  must stay free of `sorry`; its axioms are only `propext`, `Classical.choice`, `Quot.sound`.
+  `separableRank_radial_eq_iff`, `separableRank_radial_two_eq_iff`,
+  `separableRank_radial_complex_eq_iff`, `separableRank_radial_profile`, and
+  `separableRank_radial_gaussian_profile` in `Main.lean` / `MultiRealRank.lean`). It must stay
+  free of `sorry`; its axioms are only `propext`, `Classical.choice`, `Quot.sound`.
 - `Experiments/` and `Experiments.lean`: alternative proofs of the semigroup step, none used
   by the main proof and all free of `sorry`: finite differences (`GeneratorBound.lean`,
   `FiniteDifferenceSemigroup.lean`), nonstandard analysis with sequences
@@ -90,7 +91,8 @@
   suggested citation is pinned to the immutable commit `240dea0` (the recommended canonical
   proof of the original theorem); do not repoint it silently.
 - **README style:** self-contained explanations; define terms before using numbers; avoid
-  references to the conversation or to transient states.
+  references to the conversation or to transient states; in GitHub Markdown math use
+  `\mathrm{...}` (never `\operatorname{...}`).
 - Commits end with the trailer
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`. Commit only when
   asked; do not push unless asked.
@@ -115,21 +117,20 @@
   on the complex translate space is a continuous semigroup, hence `exp (t A)` (`Semigroup`, by
   integral smoothing; `TranslationSemigroup`); generalized eigenvectors give exponential
   polynomials (`Necessity`).
-- 2-D exact rank (`ComplexRank`, `Sufficiency`): Taylor expansion gives the upper bound; the
-  product annihilator `∏ (X - μᵢ)^(deg Pᵢ + 1)` divides the Cayley–Hamilton annihilator of the
-  generator, giving the lower bound; real 2-D sufficiency expands nonreal components into
-  conjugate pairs.
-- Exact `d`-D complex exponential-polynomial rank (`MultiComplexRank`, `d ≥ 2`): root-of-unity
-  interpolation on `ℂ[T] / (T^(m + 1))` splits `P(∑ j, s_j) exp(λ ∑ j, s_j)` into
-  `(d - 1) deg P + 1` products; flattened matricization (`j = 0` vs `j > 0`) for single blocks
-  plus Alder–Strassen substitution across rates gives the matching lower bound
-  `∑ i, ((d - 1) deg Pᵢ + 1)` via `exists_linear_factors_of_span_eq_top`.
-- Exact `d`-D real multi-Gaussian rank (`MultiGaussian`, `d ≥ 2`): the alternating `2 d`-th
-  root-of-unity identity `re_prod_eq_sum_re` splits `Re (∏ j, z_j)` into `d` real `d`-way
-  products (`IsSumOfProducts.re`), giving both `d`-D finite-rank sufficiency for arbitrary
-  degrees and the upper bound `r + d * c` for `r` real + `c` nonreal Gaussians; Alder–Strassen
-  substitution on `(ι_R → ℝ) × (ι_C → ℂ)` (`single_complex_rank_ge`, `gaussianForm_rank_ge`)
-  proves the matching lower bound.
+- 2-D differential annihilators (`ComplexRank`, `Annihilator`): Taylor expansion bounds
+  `translateSpan` from above; the product annihilator `∏ (X - μᵢ)^(deg Pᵢ + 1)` divides the
+  Cayley–Hamilton annihilator of the generator, giving the lower bound and minimal annihilator.
+- Exact `d`-D complex exponential-polynomial rank (`MultiComplexRank`, `d ≥ 2`): shifted
+  root-of-unity extraction (`coeff_eq_sum_rootsOfUnity`) splits `P(∑ j, s_j) exp(λ ∑ j, s_j)`
+  into `(d - 1) deg P + 1` products; Alder–Strassen degree peeling (`truncForm_rank_ge`) proves
+  the matching lower bound `∑ i, ((d - 1) deg Pᵢ + 1)` via `exists_linear_factors_of_span_eq_top`.
+- Exact `d`-D real exponential-polynomial rank (`MultiRealRank`, `d ≥ 2`): real rates use
+  Lagrange interpolation over `ℝ` (`(d - 1) deg P + 1` terms), while nonreal rates use the
+  universal alternating root-of-unity polynomial-product identity `re_coeff_prod_eq_sum_re`
+  (`2 (d - 1) deg P + d` terms, reducing at `deg P = 0` to `re_prod_eq_sum_re`). Unified
+  Alder–Strassen peeling on `RealExpSpace m_R m_C` (`cplxTruncForm_rank_ge`, `realExpForm_rank_ge`)
+  proves the matching lower bound `multiTotalCost d cs`, specializing to both `gaussianTotalCost`
+  (`r + d * c`) and 2-D `totalCost`.
 
 ## Mathematics of the nonstandard proofs
 

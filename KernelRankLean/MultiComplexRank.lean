@@ -196,6 +196,36 @@ lemma natDegree_revHassePoly_le (P : ℂ[X]) (k : ℕ) (u : ℂ) :
   have : n ≠ k - q := by omega
   simp [this]
 
+/-- `coeff k` of `revHassePoly P k (u j₀) * ∏ j ≠ j₀, truncExpPoly k (u j)` equals
+`P.eval (∑ j, u j)` for `k = P.natDegree`. -/
+lemma coeff_revHassePoly_mul_prod_truncExpPoly {d : ℕ} (P : ℂ[X]) (j₀ : Fin d) (u : Fin d → ℂ) :
+    (revHassePoly P P.natDegree (u j₀) *
+      ∏ j ∈ Finset.univ.erase j₀, truncExpPoly P.natDegree (u j)).coeff P.natDegree =
+      P.eval (∑ j : Fin d, u j) := by
+  let k := P.natDegree
+  let rest : Finset (Fin d) := Finset.univ.erase j₀
+  rw [coeff_mul, Finset.Nat.sum_antidiagonal_eq_sum_range_succ fun m p =>
+    (revHassePoly P k (u j₀)).coeff m * (∏ j ∈ rest, truncExpPoly k (u j)).coeff p]
+  have hsum_u : u j₀ + ∑ j ∈ rest, u j = ∑ j : Fin d, u j :=
+    Finset.add_sum_erase Finset.univ u (Finset.mem_univ j₀)
+  let T := ∑ j ∈ rest, u j
+  have hanti : ∑ m ∈ Finset.range (k + 1),
+      (revHassePoly P k (u j₀)).coeff m * (∏ j ∈ rest, truncExpPoly k (u j)).coeff (k - m) =
+      ∑ q ∈ Finset.range (k + 1), (hasseDeriv q P).eval (u j₀) * T ^ q := by
+    rw [← Finset.sum_range_reflect]
+    refine Finset.sum_congr rfl fun q hq => ?_
+    have hqk : q ≤ k := Nat.lt_succ_iff.mp (Finset.mem_range.mp hq)
+    have hsub : k - (k - q) = q := by omega
+    simp only [Nat.add_sub_cancel]
+    rw [hsub, coeff_revHassePoly P k (u j₀) (Nat.sub_le k q), hsub,
+      coeff_prod_truncExpPoly rest k u hqk]
+    have hfq : (q.factorial : ℂ) ≠ 0 := Nat.cast_ne_zero.mpr q.factorial_ne_zero
+    dsimp [T]
+    field_simp
+  rw [hanti, ← hsum_u, add_comm (u j₀) T, ← taylor_eval,
+    eval_eq_sum_range' (by rw [natDegree_taylor]; exact Nat.lt_succ_self k)]
+  exact Finset.sum_congr rfl fun q _ => by rw [taylor_coeff]
+
 /-- In `d ≥ 2` coordinates, a single exponential polynomial `expPoly P μ (∑ j, s j)` is a sum of
 `(d - 1) * P.natDegree + 1` coordinatewise products. -/
 lemma isSumOfProducts_expPoly {d : ℕ} (hd : 2 ≤ d) (P : ℂ[X]) (μ : ℂ) :
@@ -229,31 +259,8 @@ lemma isSumOfProducts_expPoly {d : ℕ} (hd : 2 ≤ d) (P : ℂ[X]) (μ : ℂ) :
     have : 1 * k ≤ (d - 1) * k := Nat.mul_le_mul_right k (by omega)
     dsimp [L]
     omega
-  have hcoeffQ : Q.coeff k = P.eval (∑ j : Fin d, (s j : ℂ)) := by
-    rw [show Q = _ from rfl, coeff_mul,
-      Finset.Nat.sum_antidiagonal_eq_sum_range_succ fun m p =>
-        (revHassePoly P k (s j₀ : ℂ)).coeff m *
-          (∏ j ∈ rest, truncExpPoly k (s j : ℂ)).coeff p]
-    have hsum_s : (s j₀ : ℂ) + ∑ j ∈ rest, (s j : ℂ) = ∑ j : Fin d, (s j : ℂ) :=
-      Finset.add_sum_erase Finset.univ (fun j => (s j : ℂ)) (Finset.mem_univ j₀)
-    let T := ∑ j ∈ rest, (s j : ℂ)
-    have hanti : ∑ m ∈ Finset.range (k + 1),
-        (revHassePoly P k (s j₀ : ℂ)).coeff m *
-          (∏ j ∈ rest, truncExpPoly k (s j : ℂ)).coeff (k - m) =
-        ∑ q ∈ Finset.range (k + 1), (hasseDeriv q P).eval (s j₀ : ℂ) * T ^ q := by
-      rw [← Finset.sum_range_reflect]
-      refine Finset.sum_congr rfl fun q hq => ?_
-      have hqk : q ≤ k := Nat.lt_succ_iff.mp (Finset.mem_range.mp hq)
-      have hsub : k - (k - q) = q := by omega
-      simp only [Nat.add_sub_cancel]
-      rw [hsub, coeff_revHassePoly P k (s j₀ : ℂ) (Nat.sub_le k q), hsub,
-        coeff_prod_truncExpPoly rest k (fun j => (s j : ℂ)) hqk]
-      have hfq : (q.factorial : ℂ) ≠ 0 := Nat.cast_ne_zero.mpr q.factorial_ne_zero
-      dsimp [T]
-      field_simp
-    rw [hanti, ← hsum_s, add_comm (s j₀ : ℂ) T, ← taylor_eval,
-      eval_eq_sum_range' (by rw [natDegree_taylor]; exact Nat.lt_succ_self k)]
-    exact Finset.sum_congr rfl fun q _ => by rw [taylor_coeff]
+  have hcoeffQ : Q.coeff k = P.eval (∑ j : Fin d, (s j : ℂ)) :=
+    coeff_revHassePoly_mul_prod_truncExpPoly P j₀ (fun j => (s j : ℂ))
   have hroots := coeff_eq_sum_rootsOfUnity Q hkL hdegQ
   rw [hcoeffQ, ← Fin.sum_univ_eq_sum_range] at hroots
   simp only [expPoly, Complex.ofReal_sum, hroots, Finset.sum_mul, Finset.mul_sum]
