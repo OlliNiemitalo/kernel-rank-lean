@@ -11,11 +11,8 @@ if [ "${1:-}" = "--version" ]; then
 fi
 
 token="${AIXIV_GITHUB_COPILOT_TOKEN:-}"
-if [ -z "$token" ] && [ -f "$tmp/aixiv.token" ]; then
-  token="$(tr -d '[:space:]' < "$tmp/aixiv.token")"
-fi
 if [ -z "$token" ]; then
-  echo "error: set AIXIV_GITHUB_COPILOT_TOKEN (or place token in .tmp/aixiv.token)" >&2
+  echo "error: AIXIV_GITHUB_COPILOT_TOKEN is not set" >&2
   exit 1
 fi
 
