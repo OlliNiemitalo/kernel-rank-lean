@@ -50,6 +50,35 @@ lemma IsSumOfProducts.finsetSum {𝕜 : Type*} [CommSemiring 𝕜] {ι α : Type
   exact ((e.symm.sum_comp (fun p : Σ a, Fin (N a) => ∏ i, f p.1 p.2 i (x i))).trans
     (Fintype.sum_sigma _)).symm
 
+lemma IsSumOfProducts.smul {𝕜 : Type*} [CommSemiring 𝕜] {ι : Type*} [Fintype ι] [Nonempty ι]
+    {X : ι → Type*} {K : (∀ i, X i) → 𝕜} {N : ℕ} (c : 𝕜) (hK : IsSumOfProducts K N) :
+    IsSumOfProducts (fun x => c * K x) N := by
+  classical
+  obtain ⟨i₀⟩ := ‹Nonempty ι›
+  obtain ⟨f, hf⟩ := hK
+  refine ⟨fun n i x => if i = i₀ then c * f n i x else f n i x, fun x => ?_⟩
+  dsimp only
+  rw [hf x, Finset.mul_sum]
+  refine Finset.sum_congr rfl fun n _ => ?_
+  rw [← Finset.mul_prod_erase Finset.univ (fun i => f n i (x i)) (Finset.mem_univ i₀),
+    ← Finset.mul_prod_erase Finset.univ _ (Finset.mem_univ i₀)]
+  have her : ∏ i ∈ Finset.univ.erase i₀,
+      (if i = i₀ then c * f n i (x i) else f n i (x i)) =
+      ∏ i ∈ Finset.univ.erase i₀, f n i (x i) :=
+    Finset.prod_congr rfl fun i hi => by simp [Finset.ne_of_mem_erase hi]
+  rw [her]
+  simp [mul_assoc]
+
+lemma IsSumOfProducts.add {𝕜 : Type*} [CommSemiring 𝕜] {ι : Type*} [Fintype ι]
+    {X : ι → Type*} {K₁ K₂ : (∀ i, X i) → 𝕜} {N₁ N₂ : ℕ}
+    (h₁ : IsSumOfProducts K₁ N₁) (h₂ : IsSumOfProducts K₂ N₂) :
+    IsSumOfProducts (fun x => K₁ x + K₂ x) (N₁ + N₂) := by
+  let K : Bool → (∀ i, X i) → 𝕜 := fun b => cond b K₁ K₂
+  let N : Bool → ℕ := fun b => cond b N₁ N₂
+  have hsum := IsSumOfProducts.finsetSum (α := Bool) (K := K) (N := N) fun b => by
+    cases b <;> assumption
+  simpa [K, N, add_comm] using hsum
+
 /-- Coordinatewise surjections preserve separable rank. -/
 theorem separableRank_comp_surjective {𝕜 : Type*} [CommSemiring 𝕜] {ι : Type*} [Fintype ι]
     {X Y : ι → Type*} (K : (∀ i, X i) → 𝕜) {g : ∀ i, Y i → X i}

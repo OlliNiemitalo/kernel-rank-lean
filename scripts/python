@@ -5,8 +5,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 export MPLCONFIGDIR="$tmp/cache/matplotlib"
 export UV_CACHE_DIR="$tmp/cache/uv"
+export PYTHONPYCACHEPREFIX="$tmp/cache/pycache"
 export TRITON_DEFAULT_FP_FUSION=1
-mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR"
+mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR" "$PYTHONPYCACHEPREFIX"
 
 if [ ! -x "$tmp/venv/bin/python" ]; then
   uv venv --python /usr/bin/python3 "$tmp/venv" >&2

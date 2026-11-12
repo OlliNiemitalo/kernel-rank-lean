@@ -3,11 +3,17 @@ Generate publication-quality vector PDF figures for `paper/main.tex` from
 `Applications/results_blur_2d.json` and `Applications/results_acoustics_3d.json`.
 """
 import json
+import math
 import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import FancyBboxPatch
 import numpy as np
+from scipy.ndimage import convolve1d
+
+from blur_2d import orthogonal_rowspan_channels_1d, per_component_channels_1d
 
 
 def configure_style():
@@ -23,6 +29,348 @@ def configure_style():
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
+
+
+def make_overview_pipeline_figure(app_dir: str, paper_dir: str, preview_dir: str | None = None):
+    """
+    Pedagogical Figure 1 (Section 1.1):
+      (a) Mathematical "Components" view for 2c (N = 4): 1-D strips h(x) x v(y) -> 2-D outer products -> circular u_1, u_2 -> K.
+      (b) Computational "Rendering terms" view: orthogonalized rowSpan terms t_1..t_4 (smallest first, pass-group brackets) -> K.
+      (c) Step-by-step 2-pass image convolution showing the single overwritten horizontal intermediate buffer m <- I *_x h_n,
+          the vertical pass output m *_y v_n, and the running accumulator A_1 -> A_2 -> A_3 -> A_4 -> rendered bokeh output.
+    """
+    with open(os.path.join(app_dir, "results_blur_2d.json"), "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    fam_2c = [fam for fam in data["families"] if fam["label"] == "2c (Gaussian)"][0]
+    # Order components so u_1 is the wide low-frequency dome (c ~ 1.56) and u_2 is the higher-frequency ring (c ~ 5.27)
+    comps = sorted(fam_2c["components"], key=lambda c: c["c"])
+
+    # Custom perceptual signed colormap on white paper: crimson (-) <-> off-white (0) <-> deep navy-blue (+)
+    signed_cmap = LinearSegmentedColormap.from_list(
+        "signed_rb",
+        [(0.0, "#b81d24"), (0.28, "#ef8a62"), (0.5, "#f7f8fa"), (0.72, "#67a9cf"), (1.0, "#124982")],
+    )
+
+    def signed_display(arr: np.ndarray, peak: float | None = None, gamma: float = 0.75):
+        pk = float(np.max(np.abs(arr))) if peak is None else peak
+        if pk < 1e-15:
+            return np.zeros_like(arr), 0.0
+        normed = np.clip(arr / pk, -1.0, 1.0)
+        curved = np.sign(normed) * (np.abs(normed) ** gamma)
+        return curved, pk
+
+    # Dense 1-D grid on [-S, S] (S = 1.2) for clean kernel tiles in Panels (a) and (b)
+    S = 1.2
+    n_k = 81
+    xk = np.linspace(-S, S, n_k)
+    H_raw, V_raw = per_component_channels_1d(xk, comps, S=S)
+    H_orth, V_orth = orthogonal_rowspan_channels_1d(H_raw, V_raw)
+
+    fig = plt.figure(figsize=(13.2, 8.20))
+    aspect = 13.2 / 8.20
+
+    # Helper to draw a small image box in figure coordinates [x0, y0, w, h]
+    def add_box_ax(rect):
+        ax = fig.add_axes(rect)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_linewidth(0.6)
+            sp.set_edgecolor("#777f8c")
+        return ax
+
+    def draw_1d_hstrip(rect, vec: np.ndarray):
+        ax = add_box_ax(rect)
+        disp, _ = signed_display(vec, gamma=0.78)
+        ax.imshow(disp[None, :], aspect="auto", cmap=signed_cmap, vmin=-1.0, vmax=1.0, extent=[0, 1, -1, 1])
+        ax.axhline(0.0, color="#666666", lw=0.4, alpha=0.6)
+        v_norm = vec / (np.max(np.abs(vec)) + 1e-15)
+        ax.plot(np.linspace(0, 1, len(vec)), 0.78 * v_norm, color="#111111", lw=0.9)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(-1, 1)
+
+    def draw_1d_vstrip(rect, vec: np.ndarray):
+        ax = add_box_ax(rect)
+        disp, _ = signed_display(vec, gamma=0.78)
+        ax.imshow(disp[:, None], aspect="auto", cmap=signed_cmap, vmin=-1.0, vmax=1.0, origin="lower", extent=[-1, 1, 0, 1])
+        ax.axvline(0.0, color="#666666", lw=0.4, alpha=0.6)
+        v_norm = vec / (np.max(np.abs(vec)) + 1e-15)
+        ax.plot(0.78 * v_norm, np.linspace(0, 1, len(vec)), color="#111111", lw=0.9)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(0, 1)
+
+    def draw_2d_tile(rect, tile: np.ndarray, caption: str, peak_override: float | None = None, fontsize: float = 7.2):
+        ax = add_box_ax(rect)
+        disp, pk = signed_display(tile, peak=peak_override, gamma=0.78)
+        ax.imshow(disp, origin="lower", cmap=signed_cmap, vmin=-1.0, vmax=1.0, interpolation="bilinear")
+        pk_val = float(np.max(np.abs(tile)))
+        lbl = f"{caption} ($\\pm${pk_val:.2g})" if caption else f"$\\pm${pk_val:.2g}"
+        fig.text(rect[0] + 0.5 * rect[2], rect[1] - 0.004, lbl, ha="center", va="top", fontsize=fontsize, color="#222222")
+
+    # Background canvas axis for lines/brackets/labels across the figure
+    bg = fig.add_axes([0, 0, 1, 1], frameon=False)
+    bg.set_xlim(0, 1)
+    bg.set_ylim(0, 1)
+    bg.set_xticks([])
+    bg.set_yticks([])
+
+    def draw_sum_bracket(x_left_edge: float, y_centers: list[float], x_out_left: float, y_out: float):
+        bar_x = 0.5 * (x_left_edge + x_out_left)
+        for yc in y_centers:
+            bg.plot([x_left_edge + 0.004, bar_x], [yc, yc], color="#555e6d", lw=1.0)
+        bg.plot([bar_x, bar_x], [min(y_centers), max(y_centers)], color="#555e6d", lw=1.0)
+        bg.plot([bar_x, x_out_left - 0.004], [y_out, y_out], color="#555e6d", lw=1.0)
+        bg.text(bar_x, max(y_centers) + 0.013, r"$\Sigma$", ha="center", va="bottom", fontsize=9.5, color="#333b48")
+
+    # =========================================================================
+    # TOP HALF (y in [0.48, 0.99]): (a) Components vs. (b) Rendering terms
+    # =========================================================================
+    bg.text(0.245, 0.986, "(a) Mathematical \"Components\" view ($K = u_1 + u_2$, circular per component)",
+            ha="center", va="top", fontsize=9.8, fontweight="bold", color="#111111")
+    bg.text(0.755, 0.986, "(b) Computational \"Rendering terms\" view ($K = t_1 + t_2 + t_3 + t_4$, smallest first)",
+            ha="center", va="top", fontsize=9.8, fontweight="bold", color="#111111")
+    bg.plot([0.50, 0.50], [0.482, 0.986], color="#d0d5dd", lw=0.9, ls="--")
+
+    tile_w = 0.051
+    tile_h = tile_w * aspect  # square in physical inches (~0.0821)
+    strip_thick_w = 0.0135
+    strip_thick_h = strip_thick_w * aspect
+    row_ys = [0.838, 0.728, 0.618, 0.508]  # bottom y of each of the 4 rows
+
+    # --- Panel (a): Components ---
+    xa_h = 0.018
+    xa_v = xa_h + tile_w + 0.018
+    xa_t0 = xa_v + strip_thick_w + 0.020
+    xa_u = xa_t0 + tile_w + 0.045
+    xa_K = xa_u + tile_w + 0.045
+
+    raw_tiles = []
+    for i in range(4):
+        y0 = row_ys[i]
+        yc = y0 + 0.5 * tile_h
+        draw_1d_hstrip([xa_h, yc - 0.5 * strip_thick_h, tile_w, strip_thick_h], H_raw[i])
+        bg.text(xa_h + tile_w + 0.009, yc, r"$\times$", ha="center", va="center", fontsize=10.5, color="#333333")
+        draw_1d_vstrip([xa_v, y0, strip_thick_w, tile_h], V_raw[i])
+        bg.text(xa_v + strip_thick_w + 0.010, yc, "$=$", ha="center", va="center", fontsize=10.0, color="#333333")
+        t_ij = np.outer(V_raw[i], H_raw[i])
+        raw_tiles.append(t_ij)
+        draw_2d_tile([xa_t0, y0, tile_w, tile_h], t_ij, "")
+
+    u1_tile = raw_tiles[0] + raw_tiles[1]
+    u2_tile = raw_tiles[2] + raw_tiles[3]
+    K_tile = u1_tile + u2_tile
+
+    yc_rows = [y + 0.5 * tile_h for y in row_ys]
+    yu1 = 0.5 * (yc_rows[0] + yc_rows[1])
+    yu2 = 0.5 * (yc_rows[2] + yc_rows[3])
+    yK = 0.5 * (yu1 + yu2)
+
+    draw_sum_bracket(xa_t0 + tile_w, [yc_rows[0], yc_rows[1]], xa_u, yu1)
+    draw_sum_bracket(xa_t0 + tile_w, [yc_rows[2], yc_rows[3]], xa_u, yu2)
+    draw_2d_tile([xa_u, yu1 - 0.5 * tile_h, tile_w, tile_h], u1_tile, "$u_1$")
+    draw_2d_tile([xa_u, yu2 - 0.5 * tile_h, tile_w, tile_h], u2_tile, "$u_2$")
+
+    draw_sum_bracket(xa_u + tile_w, [yu1, yu2], xa_K, yK)
+    draw_2d_tile([xa_K, yK - 0.5 * tile_h, tile_w, tile_h], K_tile, "$K$")
+    y_col_hdr = row_ys[0] + tile_h + 0.012
+    bg.text(xa_h + 0.5 * tile_w, y_col_hdr, "1-D horiz. $h(x)$", ha="center", va="bottom", fontsize=7.5, color="#444444")
+    bg.text(xa_v + 0.5 * strip_thick_w, y_col_hdr, "$v(y)$", ha="center", va="bottom", fontsize=7.5, color="#444444")
+    bg.text(xa_t0 + 0.5 * tile_w, y_col_hdr, "2-D product", ha="center", va="bottom", fontsize=7.5, color="#444444")
+    bg.text(xa_u + 0.5 * tile_w, yu1 + 0.5 * tile_h + 0.012, "Circular\ncomponents", ha="center", va="bottom", fontsize=7.5, color="#444444")
+
+    # --- Panel (b): Rendering terms (orthogonalized rowSpan, smallest first) ---
+    xb_br = 0.542
+    xb_h = 0.556
+    xb_v = xb_h + tile_w + 0.018
+    xb_t0 = xb_v + strip_thick_w + 0.020
+    xb_K = xb_t0 + tile_w + 0.050
+
+    orth_tiles = []
+    for i in range(4):
+        y0 = row_ys[i]
+        yc = y0 + 0.5 * tile_h
+        draw_1d_hstrip([xb_h, yc - 0.5 * strip_thick_h, tile_w, strip_thick_h], H_orth[i])
+        bg.text(xb_h + tile_w + 0.009, yc, r"$\times$", ha="center", va="center", fontsize=10.5, color="#333333")
+        draw_1d_vstrip([xb_v, y0, strip_thick_w, tile_h], V_orth[i])
+        bg.text(xb_v + strip_thick_w + 0.010, yc, "$=$", ha="center", va="center", fontsize=10.0, color="#333333")
+        t_ij = np.outer(V_orth[i], H_orth[i])
+        orth_tiles.append(t_ij)
+        sgn_lbl = "$-$" if np.dot(H_orth[i], V_orth[i]) < 0 else "$+$"
+        draw_2d_tile([xb_t0, y0, tile_w, tile_h], t_ij, f"$t_{i+1}$({sgn_lbl})")
+
+    # Pass-group brackets on the left (2 real rendering terms per complex pass group)
+    for g_idx, (r_top, r_bot) in enumerate([(0, 1), (2, 3)]):
+        yt = row_ys[r_top] + tile_h - 0.005
+        yb = row_ys[r_bot] + 0.005
+        bg.plot([xb_br + 0.007, xb_br, xb_br, xb_br + 0.007], [yt, yt, yb, yb], color="#1f77b4", lw=1.1)
+        bg.text(xb_br - 0.004, 0.5 * (yt + yb), f"Pass\ngroup {g_idx+1}", ha="right", va="center", fontsize=7.0, color="#1f5a96")
+
+    K_orth_tile = sum(orth_tiles)
+    draw_sum_bracket(xb_t0 + tile_w, yc_rows, xb_K, yK)
+    draw_2d_tile([xb_K, yK - 0.5 * tile_h, tile_w, tile_h], K_orth_tile, "$K$")
+
+    # Legend note for signed color scale at right of Panel (b)
+    note_box = FancyBboxPatch((0.880, 0.520), 0.106, 0.165, boxstyle="round,pad=0.008",
+                              fc="#f8f9fb", ec="#cfd6e0", lw=0.8)
+    bg.add_patch(note_box)
+    bg.text(0.933, 0.672, "Signed values", ha="center", va="top", fontsize=8.0, fontweight="bold", color="#222222")
+    bg.text(0.933, 0.642, "Blue: $> 0$\nWhite: $0$\nRed: $< 0$\n\nEach tile scaled\nto its own $\\pm$peak.\nNo intermediate\nblowup in (b)!",
+            ha="center", va="top", fontsize=7.0, color="#333333")
+
+    bg.text(xb_h + 0.5 * tile_w, y_col_hdr, "1-D $\\tilde{h}_n(x)$", ha="center", va="bottom", fontsize=7.5, color="#444444")
+    bg.text(xb_v + 0.5 * strip_thick_w, y_col_hdr, "$\\pm\\tilde{h}_n$", ha="center", va="bottom", fontsize=7.5, color="#444444")
+    bg.text(xb_t0 + 0.5 * tile_w, y_col_hdr, "Rendering term $t_n$", ha="center", va="bottom", fontsize=7.5, color="#444444")
+
+    # Horizontal divider separating kernel decomposition (top) and image pipeline (bottom)
+    bg.plot([0.015, 0.985], [0.472, 0.472], color="#c5ccd6", lw=1.0)
+
+    # =========================================================================
+    # BOTTOM HALF (y in [0.015, 0.462]): (c) Step-by-step image pipeline with intermediates
+    # =========================================================================
+    bg.text(
+        0.50, 0.460,
+        "(c) Streaming 2-pass image convolution ($N = 4$): horizontal pass $m \\leftarrow I *_x \\tilde{h}_n$ "
+        "(reusing one intermediate buffer $m$) followed by $A \\leftarrow A + m *_y \\tilde{v}_n$",
+        ha="center", va="top", fontsize=9.6, fontweight="bold", color="#111111",
+    )
+
+    # Build a crisp 144x144 zero-background test patch with 2 bright point stars + a tilted geometric bar
+    N_img = 144
+    R_blur = 18.0
+    L_tap = int(math.ceil(R_blur * S))
+    x_tap = np.arange(-L_tap, L_tap + 1, dtype=np.float64) / R_blur
+    H_t_raw, V_t_raw = per_component_channels_1d(x_tap, comps, S=S)
+    H_t, V_t = orthogonal_rowspan_channels_1d(H_t_raw, V_t_raw)
+    ksum = float(np.sum((H_t @ np.ones(H_t.shape[1])) * (V_t @ np.ones(V_t.shape[1]))))
+    H_t = H_t / math.sqrt(abs(ksum))
+    V_t = V_t / math.sqrt(abs(ksum)) * (1.0 if ksum > 0 else -1.0)
+
+    img = np.zeros((N_img, N_img), dtype=np.float64)
+    yy, xx = np.meshgrid(np.arange(N_img), np.arange(N_img), indexing="ij")
+    img[98:101, 38:41] = 4.2
+    img[106:109, 98:101] = 2.6
+    rot_u = (xx - 72) * math.cos(0.38) + (yy - 40) * math.sin(0.38)
+    rot_v = -(xx - 72) * math.sin(0.38) + (yy - 40) * math.cos(0.38)
+    bar_mask = (np.abs(rot_u) <= 34.0) & (np.abs(rot_v) <= 5.5)
+    img[bar_mask] = 0.85
+
+    m_steps = []
+    dA_steps = []
+    A_steps = []
+    acc = np.zeros_like(img)
+    for n in range(4):
+        m_n = convolve1d(img, H_t[n], axis=1, mode="nearest")
+        dA_n = convolve1d(m_n, V_t[n], axis=0, mode="nearest")
+        acc = acc + dA_n
+        m_steps.append(m_n)
+        dA_steps.append(dA_n)
+        A_steps.append(acc.copy())
+
+    def render_photo(arr: np.ndarray, vmax_p: float = 0.88):
+        clipped = np.clip(0.025 + arr / vmax_p, 0.0, 1.0)
+        return np.power(clipped, 1.0 / 2.2)
+
+    b_tile_w = 0.066
+    b_tile_h = b_tile_w * aspect  # ~0.1062
+    y_b_rows = [0.288, 0.153, 0.018]  # m_n, dA_n, A_n
+
+    # Left column: Sharp Input I
+    x_in = 0.022
+    ax_in = add_box_ax([x_in, 0.242, 0.094, 0.094 * aspect])
+    ax_in.imshow(render_photo(img, vmax_p=0.95), origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
+    bg.text(x_in + 0.047, 0.400, "Sharp input $I(x, y)$", ha="center", va="bottom", fontsize=8.3, fontweight="bold", color="#111111")
+    bg.text(x_in + 0.047, 0.232, "2 bright point stars\n+ tilted bar", ha="center", va="top", fontsize=7.1, color="#444444")
+
+    loop_box = FancyBboxPatch((0.014, 0.020), 0.116, 0.168, boxstyle="round,pad=0.006",
+                              fc="#f3f6fa", ec="#b8c4d4", lw=0.8)
+    bg.add_patch(loop_box)
+    bg.text(0.072, 0.180, "Streaming GPU loop", ha="center", va="top", fontsize=7.7, fontweight="bold", color="#163b66")
+    bg.text(0.072, 0.152,
+            "$A \\leftarrow 0$\nfor $n = 1 \\dots N$:\n  $m \\leftarrow I *_x \\tilde{h}_n$\n  $A \\leftarrow A + m *_y \\tilde{v}_n$\n\nOnly 1 temp image $m$\nin memory at once!",
+            ha="center", va="top", fontsize=6.9, color="#222222")
+
+    # Row labels on left of the 4 step columns
+    x_lbl = 0.232
+    bg.text(x_lbl, y_b_rows[0] + 0.5 * b_tile_h, "1. Horiz. pass\n$m \\leftarrow I *_x \\tilde{h}_n$\n(overwrites $m$)",
+            ha="right", va="center", fontsize=7.4, color="#1f4e78", fontweight="bold")
+    bg.text(x_lbl, y_b_rows[1] + 0.5 * b_tile_h, "2. Vert. pass\n$\\Delta A_n = m *_y \\tilde{v}_n$\n(2-D term patch)",
+            ha="right", va="center", fontsize=7.4, color="#333333")
+    bg.text(x_lbl, y_b_rows[2] + 0.5 * b_tile_h, "3. Accumulator\n$A_n = \\sum_{k=1}^n \\Delta A_k$\n(running sum)",
+            ha="right", va="center", fontsize=7.4, color="#1c5e20", fontweight="bold")
+
+    col_xs = [0.248 + n * 0.148 for n in range(4)]
+    step_titles = [
+        "Step $n=1$ ($t_1$, finest)",
+        "Step $n=2$ ($t_2$, ripple)",
+        "Step $n=3$ ($t_3$, ring)",
+        "Step $n=4$ ($t_4$, core)",
+    ]
+
+    for n in range(4):
+        xc = col_xs[n]
+        bg.text(xc + 0.5 * b_tile_w, y_b_rows[0] + b_tile_h + 0.010, step_titles[n],
+                ha="center", va="bottom", fontsize=7.9, fontweight="bold", color="#222222")
+
+        # Row 0: 1-D horizontal intermediate m_n
+        ax_m = add_box_ax([xc, y_b_rows[0], b_tile_w, b_tile_h])
+        dm, pkm = signed_display(m_steps[n], gamma=0.72)
+        ax_m.imshow(dm, origin="lower", cmap=signed_cmap, vmin=-1.0, vmax=1.0, interpolation="bilinear")
+        bg.text(xc + b_tile_w + 0.004, y_b_rows[0] + 0.5 * b_tile_h, f"$\\pm${pkm:.2g}",
+                ha="left", va="center", fontsize=6.9, color="#444444")
+
+        # Downward arrow m_n -> dA_n
+        bg.annotate("", xy=(xc + 0.5 * b_tile_w, y_b_rows[1] + b_tile_h + 0.003),
+                    xytext=(xc + 0.5 * b_tile_w, y_b_rows[0] - 0.003),
+                    arrowprops={"arrowstyle": "->", "lw": 0.85, "color": "#555e6d"})
+
+        # Row 1: 2-D vertical pass output dA_n
+        ax_da = add_box_ax([xc, y_b_rows[1], b_tile_w, b_tile_h])
+        dda, pkda = signed_display(dA_steps[n], gamma=0.72)
+        ax_da.imshow(dda, origin="lower", cmap=signed_cmap, vmin=-1.0, vmax=1.0, interpolation="bilinear")
+        bg.text(xc + b_tile_w + 0.004, y_b_rows[1] + 0.5 * b_tile_h, f"$\\pm${pkda:.2g}",
+                ha="left", va="center", fontsize=6.9, color="#444444")
+
+        # Downward arrow dA_n -> A_n
+        bg.annotate("", xy=(xc + 0.5 * b_tile_w, y_b_rows[2] + b_tile_h + 0.003),
+                    xytext=(xc + 0.5 * b_tile_w, y_b_rows[1] - 0.003),
+                    arrowprops={"arrowstyle": "->", "lw": 0.85, "color": "#2ca02c"})
+
+        # Row 2: Running sum A_n
+        ax_a = add_box_ax([xc, y_b_rows[2], b_tile_w, b_tile_h])
+        da_acc, pka = signed_display(A_steps[n], gamma=0.72)
+        ax_a.imshow(da_acc, origin="lower", cmap=signed_cmap, vmin=-1.0, vmax=1.0, interpolation="bilinear")
+        bg.text(xc + b_tile_w + 0.004, y_b_rows[2] + 0.5 * b_tile_h, f"$\\pm${pka:.2g}",
+                ha="left", va="center", fontsize=6.9, color="#444444")
+
+        # Horizontal '+' arrow along the accumulator row A_1 -> A_2 -> A_3 -> A_4
+        if n < 3:
+            x_arrow_l = xc + b_tile_w + 0.036
+            x_arrow_r = col_xs[n + 1] - 0.004
+            ya_mid = y_b_rows[2] + 0.5 * b_tile_h
+            bg.annotate("", xy=(x_arrow_r, ya_mid), xytext=(x_arrow_l, ya_mid),
+                        arrowprops={"arrowstyle": "->", "lw": 1.0, "color": "#1c5e20"})
+            bg.text(0.5 * (x_arrow_l + x_arrow_r), ya_mid + 0.008, "$+$", ha="center", va="bottom",
+                    fontsize=8.5, fontweight="bold", color="#1c5e20")
+
+    # Rightmost column: Final rendered bokeh photograph!
+    x_out = 0.858
+    ax_out = add_box_ax([x_out, 0.218, 0.106, 0.106 * aspect])
+    ax_out.imshow(render_photo(A_steps[-1], vmax_p=0.48), origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="bilinear")
+    bg.text(x_out + 0.053, 0.396, "Rendered bokeh $A_4$", ha="center", va="bottom", fontsize=8.4, fontweight="bold", color="#111111")
+    bg.text(x_out + 0.053, 0.207, "Round flat-top bokeh discs\n& isotropic blurred bar;\nall X/Y streaks cancel!",
+            ha="center", va="top", fontsize=7.0, color="#222222")
+
+    # Arrow from A_4 to Rendered bokeh output
+    bg.annotate("", xy=(x_out + 0.053, 0.145), xytext=(col_xs[3] + b_tile_w + 0.038, y_b_rows[2] + 0.5 * b_tile_h),
+                arrowprops={"arrowstyle": "->", "lw": 1.1, "color": "#1c5e20", "connectionstyle": "arc3,rad=0.18"})
+
+    pdf_path = os.path.join(paper_dir, "fig_overview_pipeline.pdf")
+    fig.savefig(pdf_path)
+    if preview_dir:
+        fig.savefig(os.path.join(preview_dir, "fig_overview_pipeline.png"), dpi=200)
+    plt.close(fig)
+    print(f"Wrote {pdf_path}")
 
 
 def make_blur_2d_figure(app_dir: str, paper_dir: str, preview_dir: str | None = None):
@@ -217,10 +565,14 @@ def make_acoustics_3d_figure(app_dir: str, paper_dir: str, preview_dir: str | No
     s_r7_075 = sims["Rank-7 (2c+1r, nu=0.75)"]
 
     ax_wf.plot(ct_dense, ex_dense, color="#111111", lw=1.9, label=r"Exact 3-D D'Alembert ($r = 48.08\,\Delta x$)")
-    ax_wf.plot(s_7pt["ct"], s_7pt["traces"]["face_diag"], color="#d62728", lw=1.1, alpha=0.9, label=r"7-pt FDTD (rel $L^2 = 109.3\%$)")
-    ax_wf.plot(s_iwb["ct"], s_iwb["traces"]["face_diag"], color="#ff7f0e", lw=1.15, ls="--", alpha=0.95, label=r"27-pt IWB $\nu{=}1$ (rel $L^2 = 98.2\%$)")
-    ax_wf.plot(s_r7_075["ct"], s_r7_075["traces"]["face_diag"], "o-", color="#2ca02c", lw=1.0, ms=2.6, alpha=0.9, label=r"Rank-7 $2c{+}1r, \nu{=}0.75$ (rel $L^2 = 2.8\%$)")
-    ax_wf.plot(ct_ref, s_ref["traces"]["face_diag"], "s:", color="#1f77b4", lw=1.1, ms=3.0, label=r"Rank-7 $2c{+}1r, \nu{=}1.00$ (rel $L^2 = 2.0\%$)")
+    ax_wf.plot(s_7pt["ct"], s_7pt["traces"]["face_diag"], color="#d62728", lw=1.1, alpha=0.9,
+               label=rf"7-pt FDTD (rel $L^2 = {100*s_7pt['rel_l2']['face_diag']:.1f}\%$)")
+    ax_wf.plot(s_iwb["ct"], s_iwb["traces"]["face_diag"], color="#ff7f0e", lw=1.15, ls="--", alpha=0.95,
+               label=rf"27-pt IWB $\nu{{=}}1$ (rel $L^2 = {100*s_iwb['rel_l2']['face_diag']:.1f}\%$)")
+    ax_wf.plot(s_r7_075["ct"], s_r7_075["traces"]["face_diag"], "o-", color="#2ca02c", lw=1.0, ms=2.6, alpha=0.9,
+               label=rf"Rank-7 $2c{{+}}1r, \nu{{=}}0.75$ (rel $L^2 = {100*s_r7_075['rel_l2']['face_diag']:.1f}\%$)")
+    ax_wf.plot(ct_ref, s_ref["traces"]["face_diag"], "s:", color="#1f77b4", lw=1.1, ms=3.0,
+               label=rf"Rank-7 $2c{{+}}1r, \nu{{=}}1.00$ (rel $L^2 = {100*s_ref['rel_l2']['face_diag']:.1f}\%$)")
 
     ax_wf.set_xlim(38.0, 68.0)
     ax_wf.set_xlabel(r"Propagation distance $c_0 t / \Delta x$ [grid cells]")
@@ -272,6 +624,7 @@ def main():
     app_dir = os.path.join(repo_root, "Applications")
     paper_dir = os.path.join(repo_root, "paper")
     preview_dir = os.path.join(repo_root, ".tmp")
+    make_overview_pipeline_figure(app_dir, paper_dir, preview_dir=preview_dir)
     make_blur_2d_figure(app_dir, paper_dir, preview_dir=preview_dir)
     make_acoustics_3d_figure(app_dir, paper_dir, preview_dir=preview_dir)
 

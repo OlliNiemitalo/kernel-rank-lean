@@ -107,9 +107,9 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   peak channel cancellation at `N = 12`, producing `4.4`–`6.8 / 255` HDR bokeh errors in IEEE
   `float16` intermediates; orthonormalizing `rowSpan(K)` via QR + symmetric eigendecomposition
   ([`Applications/blur_2d.py`](Applications/blur_2d.py)) achieves the global nuclear-norm minimum
-  and keeps `float16` max error at `≤ 0.17 / 255` (`11.3×`–`34.3×` faster than direct `155 × 155`
-  2-D convolution at `1920 × 1080` RGBA on an RTX 4070 Ti Super), in contrast to `d ≥ 3` where
-  Kruskal's theorem forbids continuous `GL_R(ℝ)` basis rotations.
+  max error at `≤ 0.17 / 255` (`11.3×`–`34.3×` faster than direct `155 × 155` 2-D convolution at
+  `1920 × 1080` RGBA on an RTX 4070 Ti Super), in contrast to `d ≥ 3` where minimal CP
+  decompositions lack transitive `GL_R(ℝ)` cross-component rotation freedom.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
   circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
   separable rank because of its algebraic radial decay, and can be approximated by complex-rate
@@ -135,15 +135,16 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   targeting the radial symbol `2 cos(ν ‖k‖₂)`, direct `W³` stencils scale cubically while purely
   axial stencils cannot generate mixed `k_x² k_y²` terms. Kowalczyk and van Walstijn's 27-point
   `IWB` room-acoustics stencil is identically a single real Gaussian `(r = 1, c = 0, L = 1)` plus a
-  center tap, incurring `9.23%` diagonal phase-velocity error by `0.80π`. Generalizing to `r` real
+  center tap, incurring `9.38%` diagonal phase-velocity error by `0.80π`. Generalizing to `r` real
   and `c` complex-conjugate Gaussians (`separableRank_radial_gaussian_profile`, exact 3-way rank
   `r + 3 c` via `re_prod_eq_sum_re` vs. `r + 4 c` naive; `7` vs. `9` for `deg P = 1` via
-  `re_coeff_prod_eq_sum_re`), certified von Neumann-stable propagators in
+  `re_coeff_prod_eq_sum_re`), von Neumann-stable propagators optimized in
   [`Applications/acoustics_3d.py`](Applications/acoustics_3d.py) (`R = 7`, `W = 13`, `ν = 1.00`)
-  reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.055%` (extending the
-  `0.1%`-accurate bandwidth from `0.091π` to `0.82π`—`731×` less GPU memory and `381×`–`529×`
-  faster wall-clock time on an RTX 4070 Ti Super at equal dispersion accuracy), while half-sample
-  even reflection enforces exact rigid-wall Neumann boundary conditions.
+  reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.049%` (extending the
+  `0.1%`-accurate bandwidth from `0.085π` to `0.81π`—an analytical resolution-scaling reduction of
+  `865×` in grid voxels and `476×`–`660×` in compute time on an RTX 4070 Ti Super at equal
+  dispersion accuracy), while half-sample even reflection enforces exact rigid-wall Neumann
+  boundary conditions.
 * **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
   Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
   sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center
@@ -176,7 +177,7 @@ The proof is in [KernelRankLean](KernelRankLean):
 | `Annihilator.lean` | 2-D rank equals the least constant-coefficient differential-annihilator order |
 | `MultiComplexRank.lean` | Exact `d`-way complex exponential-polynomial rank `∑ i, ((d - 1) deg Pᵢ + 1)` |
 | `MultiRealRank.lean` | Root-of-unity & real Lagrange decompositions; exact `d`-way real rank `multiTotalCost d cs` |
-| `Main.lean` | The `d`-D and 2-D main theorems |
+| `Main.lean` | The `d`-D and 2-D main theorems and exact-vs.-border rank separation on `‖x‖² cos(‖x‖²)` |
 
 Outside the proof:
 
@@ -213,6 +214,7 @@ size, not mathematical complexity.
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 | [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
 | [`9722ff5`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/9722ff5b2e2f788874a99378165af2206f0d7d42) | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
+| This revision | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25

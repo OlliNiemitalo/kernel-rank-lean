@@ -53,32 +53,66 @@ def verify_iwb_is_single_real_gaussian():
     print("Verified: 27-pt Kowalczyk-van Walstijn IWB == (r=1, c=0, L=1) real Gaussian to < 1e-16.")
 
 
+def build_octant_unit_dirs(n_bary: int = 16) -> np.ndarray:
+    """153 unit vectors covering the symmetry-reduced octant 0 <= ux <= uy <= uz, ||u||_2 = 1."""
+    pts = []
+    for i in range(n_bary + 1):
+        for j in range(i, n_bary + 1):
+            for l in range(j, n_bary + 1):
+                if i + j + l == 0:
+                    continue
+                v = np.array([i, j, l], dtype=np.float64)
+                pts.append(v / np.linalg.norm(v))
+    arr = np.unique(np.round(np.array(pts), 12), axis=0)
+    return arr / np.linalg.norm(arr, axis=1, keepdims=True)
+
+
 def build_ray_grid(n_ray: int = 48, k_cut_frac: float = 0.80):
-    s = np.linspace(0.0, np.pi, n_ray)[1:]
-    rays = [
-        np.column_stack([s, np.zeros_like(s), np.zeros_like(s)]),
-        np.column_stack([s, s, np.zeros_like(s)]),
-        np.column_stack([s, s, s]),
-        np.column_stack([s, 0.5 * s, np.zeros_like(s)]),
-        np.column_stack([s, s, 0.5 * s]),
+    s = np.unique(np.concatenate([
+        np.linspace(0.0, np.pi, n_ray)[1:],
+        np.linspace(0.02 * np.pi, k_cut_frac * np.pi, 32),
+        np.array([k_cut_frac * np.pi]),
+    ]))
+    u_coarse = build_octant_unit_dirs(4)  # ~19 octant directions including (1,0,0), (1,1,0), (1,1,1), (1,1.5,1)
+    rays = []
+    for u in u_coarse:
+        r_max_box = np.pi / np.max(u)
+        rs = s[s <= r_max_box + 1e-12]
+        rays.append(np.outer(rs, u))
+    rays.extend([
         np.column_stack([np.full_like(s, np.pi), s, np.zeros_like(s)]),
         np.column_stack([np.full_like(s, np.pi), np.full_like(s, np.pi), s]),
-    ]
+    ])
     K = np.vstack(rays)
     kmag = np.linalg.norm(K, axis=1)
     k_cut = k_cut_frac * np.pi
-    return K, kmag, (kmag > 0.0) & (kmag <= k_cut)
+    return K, kmag, (kmag > 0.0) & (kmag <= k_cut + 1e-12)
 
 
 def build_octant_grid(n_1d: int = 65, k_cut_frac: float = 0.80):
-    """All n_1d*(n_1d+1)*(n_1d+2)/6 - 1 nonzero sorted triples 0 <= kx <= ky <= kz <= pi."""
+    """
+    Combined Brillouin-octant verification set:
+      - All n_1d*(n_1d+1)*(n_1d+2)/6 - 1 nonzero sorted Cartesian triples in [0, pi]^3, PLUS
+      - Dense spherical-octant shells (250 radii in (0, pi] including exact 0.75pi, 0.80pi, 0.85pi
+        across 153 octant unit directions).
+    """
     k1 = np.linspace(0.0, np.pi, n_1d)
     ii, jj, ll = np.meshgrid(np.arange(n_1d), np.arange(n_1d), np.arange(n_1d), indexing="ij")
     mask = (ii <= jj) & (jj <= ll) & ((ii + jj + ll) > 0)
-    K = np.column_stack([k1[ii[mask]], k1[jj[mask]], k1[ll[mask]]])
+    K_cart = np.column_stack([k1[ii[mask]], k1[jj[mask]], k1[ll[mask]]])
+
+    u_dirs = build_octant_unit_dirs(16)
+    radii = np.unique(np.concatenate([
+        np.linspace(0.004 * np.pi, np.pi, 250),
+        np.array([0.75 * np.pi, 0.80 * np.pi, 0.85 * np.pi]),
+    ]))
+    K_sph = np.einsum("r,du->rdu", radii, u_dirs).reshape(-1, 3)
+    K_sph = K_sph[np.max(K_sph, axis=1) <= np.pi + 1e-12]
+
+    K = np.vstack([K_cart, K_sph])
     kmag = np.linalg.norm(K, axis=1)
     k_cut = k_cut_frac * np.pi
-    return K, kmag, (kmag > 0.0) & (kmag <= k_cut)
+    return K, kmag, (kmag > 0.0) & (kmag <= k_cut + 1e-12)
 
 
 def basis_poly_pts(K: np.ndarray, L: int, specs):
@@ -168,23 +202,68 @@ def solve_propagator_lp(B: np.ndarray, d2_row: np.ndarray, kmag: np.ndarray, in_
     return err, w
 
 
-def effective_bandwidth_frac(K_oct: np.ndarray, kmag_oct: np.ndarray, M_oct: np.ndarray, nu: float, tol: float) -> float:
+def effective_bandwidth_frac_fn(eval_M_fn, nu: float, tol: float, u_dirs: np.ndarray) -> float:
     """
-    Largest spherical wavenumber cutoff k_max / pi <= 1.0 such that |c_num(k)/c_0 - 1| <= tol
-    for ALL points in the 65^3 octant with 0 < |k| <= k_max.
+    Conservative spherical wavenumber cutoff k_max / pi <= 1.0 such that |c_num(k)/c_0 - 1| <= tol
+    across all 153 octant directions, refined by 24-step bisection between the last passing shell
+    and the first failing shell.
     """
-    in_sphere = kmag_oct <= np.pi
-    ks = kmag_oct[in_sphere]
-    Ms = M_oct[in_sphere]
-    # Unstable modes exceed tol immediately
-    unstable = np.abs(Ms) > 2.0
-    pv_err = np.full_like(ks, np.inf)
+    radii = np.linspace(0.002 * np.pi, np.pi, 500)
+    K_all = np.einsum("r,du->rdu", radii, u_dirs).reshape(-1, 3)
+    M_all = eval_M_fn(K_all).reshape(len(radii), len(u_dirs))
+    unstable = np.abs(M_all) > 2.0
+    pv_err = np.full_like(M_all, np.inf)
     ok = ~unstable
-    pv_err[ok] = np.abs(np.arccos(np.clip(Ms[ok] / 2.0, -1.0, 1.0)) / (nu * ks[ok]) - 1.0)
-    bad = ks[pv_err > tol]
-    if bad.size == 0:
+    r_bcast = np.broadcast_to(radii[:, None], M_all.shape)
+    pv_err[ok] = np.abs(np.arccos(np.clip(M_all[ok] / 2.0, -1.0, 1.0)) / (nu * r_bcast[ok]) - 1.0)
+    shell_worst = np.max(pv_err, axis=1)
+    bad_idx = np.where(shell_worst > tol)[0]
+    if bad_idx.size == 0:
         return 1.0
-    return float(np.min(bad) / np.pi)
+    first_bad = int(bad_idx[0])
+    if first_bad == 0:
+        return 0.0
+    r_lo = float(radii[first_bad - 1])
+    r_hi = float(radii[first_bad])
+    for _ in range(24):
+        r_mid = 0.5 * (r_lo + r_hi)
+        M_mid = eval_M_fn(r_mid * u_dirs)
+        if np.any(np.abs(M_mid) > 2.0):
+            r_hi = r_mid
+        else:
+            err_mid = float(np.max(np.abs(np.arccos(np.clip(M_mid / 2.0, -1.0, 1.0)) / (nu * r_mid) - 1.0)))
+            if err_mid <= tol:
+                r_lo = r_mid
+            else:
+                r_hi = r_mid
+    return r_lo / np.pi
+
+
+def continuous_refine_max_pv_err(eval_M_fn, K_pass: np.ndarray, pv_err_grid: np.ndarray, nu: float, k_cut: float) -> float:
+    """Multi-start continuous Nelder-Mead refinement from top 20 passband grid peaks on 0 < ||k||_2 <= k_cut."""
+    best = float(np.max(pv_err_grid))
+    top_idx = np.argsort(pv_err_grid)[-20:]
+
+    def neg_err_sph(sph):
+        r, th, ph = sph
+        if r <= 1e-5 or r > k_cut or th < 0.0 or th > 0.5 * np.pi or ph < 0.0 or ph > 0.5 * np.pi:
+            return 1.0
+        kv = np.array([[r * math.sin(th) * math.cos(ph), r * math.sin(th) * math.sin(ph), r * math.cos(th)]])
+        mv = float(eval_M_fn(kv)[0])
+        if abs(mv) > 2.0:
+            return -10.0
+        return -abs(math.acos(max(-1.0, min(1.0, mv / 2.0))) / (nu * r) - 1.0)
+
+    for idx in top_idx:
+        kx, ky, kz = K_pass[idx]
+        r0 = math.sqrt(kx * kx + ky * ky + kz * kz)
+        th0 = math.acos(max(-1.0, min(1.0, kz / r0)))
+        ph0 = math.atan2(ky, max(kx, 1e-15))
+        res = minimize(neg_err_sph, np.array([min(r0, k_cut - 1e-7), th0, ph0]),
+                       method="Nelder-Mead", options={"maxiter": 180, "xatol": 1e-6, "fatol": 1e-9})
+        if -res.fun > best and -res.fun < 5.0:
+            best = float(-res.fun)
+    return best
 
 
 def evaluate_baseline_octant(scheme: str, nu: float, K_oct: np.ndarray, kmag_oct: np.ndarray):
@@ -248,19 +327,19 @@ def optimize_and_certify_propagator(label: str, L: int, structure, nu: float, k_
     specs = unpack_specs(best_theta)
 
     # Cutting-plane exact certification on full 65^3 octant (45,760 points):
-    in_oct = (kmag_oct > 0.0) & (kmag_oct <= k_cut_frac * np.pi)
+    in_oct = (kmag_oct > 0.0) & (kmag_oct <= k_cut_frac * np.pi + 1e-12)
     B_oct, d2_oct, g0_oct = basis_poly_pts(K_oct, L, specs)
-    # Start with ray indices mapped to subset of octant + iteratively add worst passband & stability violators
     rng = np.random.default_rng(0)
-    active = set(rng.choice(K_oct.shape[0], size=min(2500, K_oct.shape[0]), replace=False).tolist())
-    # Always include smallest-|k| and corner points
-    active.update(np.argsort(kmag_oct)[:200].tolist())
-    active.update(np.argsort(kmag_oct)[-200:].tolist())
+    active = set(rng.choice(K_oct.shape[0], size=min(3000, K_oct.shape[0]), replace=False).tolist())
+    active.update(np.argsort(kmag_oct)[:250].tolist())
+    active.update(np.argsort(kmag_oct)[-250:].tolist())
+    bdry_idx = np.where(np.abs(kmag_oct - k_cut_frac * np.pi) < 1e-9)[0].tolist()
+    active.update(bdry_idx)
 
     w_cert = None
-    for _ in range(8):
+    for _ in range(25):
         act_idx = np.array(sorted(active), dtype=np.int32)
-        _, w_try = solve_propagator_lp(B_oct[act_idx], d2_oct, kmag_oct[act_idx], in_oct[act_idx], nu)
+        lp_err, w_try = solve_propagator_lp(B_oct[act_idx], d2_oct, kmag_oct[act_idx], in_oct[act_idx], nu)
         if w_try is None:
             break
         w_cert = w_try
@@ -281,7 +360,9 @@ def optimize_and_certify_propagator(label: str, L: int, structure, nu: float, k_
     M_oct = 2.0 + B_oct @ w_cert
     assert float(np.max(M_oct)) <= 2.0 + 1e-9 and float(np.min(M_oct)) >= -2.0 + 5e-4, "Stability violation!"
     kp = kmag_oct[in_oct]
-    max_pv_err = float(np.max(np.abs(np.arccos(np.clip(M_oct[in_oct] / 2.0, -1.0, 1.0)) / (nu * kp) - 1.0)))
+    grid_pv_err = np.abs(np.arccos(np.clip(M_oct[in_oct] / 2.0, -1.0, 1.0)) / (nu * kp) - 1.0)
+    eval_M_prop = lambda K_q: 2.0 + basis_poly_pts(K_q, L, specs)[0] @ w_cert
+    max_pv_err = continuous_refine_max_pv_err(eval_M_prop, K_oct[in_oct], grid_pv_err, nu, k_cut_frac * np.pi)
     alpha0 = float(2.0 - np.dot(g0_oct, w_cert))
 
     # Build structured component list and exact 3-way separable 1-D factors (Proposition 3.2 & 3.3)
@@ -300,8 +381,9 @@ def optimize_and_certify_propagator(label: str, L: int, structure, nu: float, k_
 
     factors_exact, factors_naive = build_3d_separable_factors(L, comps)
     recon_err = verify_3d_stencil_reconstruction(L, comps, alpha0, factors_exact)
-    bw_01 = effective_bandwidth_frac(K_oct, kmag_oct, M_oct, nu, tol=1e-3)
-    bw_05 = effective_bandwidth_frac(K_oct, kmag_oct, M_oct, nu, tol=5e-3)
+    u_dirs = build_octant_unit_dirs(16)
+    bw_01 = effective_bandwidth_frac_fn(eval_M_prop, nu, tol=1e-3, u_dirs=u_dirs)
+    bw_05 = effective_bandwidth_frac_fn(eval_M_prop, nu, tol=5e-3, u_dirs=u_dirs)
 
     print(
         f"{label:24s} | L={L} (W={2*L+1:2d}), R={len(factors_exact):2d} (naive {len(factors_naive):2d}), nu={nu:.2f}, "
@@ -943,7 +1025,7 @@ def main():
     K_oct, kmag_oct, _ = build_octant_grid(65, k_cut_frac=0.80)
     print(f"Built 65^3 Brillouin octant certification grid: {K_oct.shape[0]} unique symmetry-inequivalent 3-D wavevectors.")
 
-    # Evaluate baselines on full 65^3 octant
+    u_dirs = build_octant_unit_dirs(16)
     baselines = []
     for name, sch, nu in [
         ("7-pt FDTD (nu=1/sqrt3)", "fdtd_7pt", 1.0 / math.sqrt(3.0)),
@@ -951,13 +1033,16 @@ def main():
         ("27-pt IWB (nu=0.75)", "iwb_27pt", 0.75),
         ("27-pt IWB (nu=1.00)", "iwb_27pt", 1.00),
     ]:
+        eval_b = lambda K_q, s=sch, n=nu: evaluate_baseline_octant(s, n, K_q, np.linalg.norm(K_q, axis=1))
         M_b = evaluate_baseline_octant(sch, nu, K_oct, kmag_oct)
-        bw01 = effective_bandwidth_frac(K_oct, kmag_oct, M_b, nu, tol=1e-3)
-        bw05 = effective_bandwidth_frac(K_oct, kmag_oct, M_b, nu, tol=5e-3)
-        in75 = kmag_oct <= 0.75 * np.pi
-        in80 = kmag_oct <= 0.80 * np.pi
-        err75 = float(np.max(np.abs(np.arccos(np.clip(M_b[in75] / 2.0, -1.0, 1.0)) / (nu * kmag_oct[in75]) - 1.0)))
-        err80 = float(np.max(np.abs(np.arccos(np.clip(M_b[in80] / 2.0, -1.0, 1.0)) / (nu * kmag_oct[in80]) - 1.0)))
+        bw01 = effective_bandwidth_frac_fn(eval_b, nu, tol=1e-3, u_dirs=u_dirs)
+        bw05 = effective_bandwidth_frac_fn(eval_b, nu, tol=5e-3, u_dirs=u_dirs)
+        in75 = kmag_oct <= 0.75 * np.pi + 1e-12
+        in80 = kmag_oct <= 0.80 * np.pi + 1e-12
+        err75_g = np.abs(np.arccos(np.clip(M_b[in75] / 2.0, -1.0, 1.0)) / (nu * kmag_oct[in75]) - 1.0)
+        err80_g = np.abs(np.arccos(np.clip(M_b[in80] / 2.0, -1.0, 1.0)) / (nu * kmag_oct[in80]) - 1.0)
+        err75 = continuous_refine_max_pv_err(eval_b, K_oct[in75], err75_g, nu, 0.75 * np.pi)
+        err80 = continuous_refine_max_pv_err(eval_b, K_oct[in80], err80_g, nu, 0.80 * np.pi)
         baselines.append({
             "label": name, "nu": nu, "err_075pi": err75, "err_080pi": err80,
             "bw_01pct_pi": bw01, "bw_05pct_pi": bw05,

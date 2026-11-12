@@ -278,6 +278,12 @@ def orthogonal_rowspan_channels_1d(H_raw: np.ndarray, V_raw: np.ndarray):
     evals_n = evals[top_idx]
     evecs_n = evecs[:, top_idx]  # (dim_Q, N)
     G_orth = (Qv @ evecs_n).T  # (N, M), orthonormal rows!
+    # Fix eigenvector sign gauge deterministically so DC/center lobe is positive:
+    for r_idx in range(N):
+        s_row = float(np.sum(G_orth[r_idx]))
+        ref = s_row if abs(s_row) > 1e-8 else float(G_orth[r_idx, G_orth.shape[1] // 2])
+        if ref < 0.0:
+            G_orth[r_idx] = -G_orth[r_idx]
     amp = np.sqrt(np.abs(evals_n))[:, None]
     sgn = np.where(evals_n >= 0, 1.0, -1.0)[:, None]
     H_orth = amp * G_orth

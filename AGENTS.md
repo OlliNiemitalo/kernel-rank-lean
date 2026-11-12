@@ -25,11 +25,11 @@
   and all Matplotlib/`uv`/Triton caches inside `.tmp/`). In Triton kernels with wider stencils
   (e.g. `L = 77`), use a runtime `range(1, L_val + 1)` loop rather than `tl.static_range` to
   avoid register spilling.
-- `paper/`: LaTeX source (`main.tex`), vector figures (`fig_blur_2d.pdf`, `fig_acoustics_3d.pdf`),
-  compiled PDF (`main.pdf`), and metadata (`metadata.json`) for the aiXiv preprint
-  `aixiv.261111.000007`; built via `scripts/build-paper` (static Tectonic in `.tmp/bin`) and
-  submitted/updated via `scripts/submit-aixiv` (reads `AIXIV_GITHUB_COPILOT_TOKEN` from the
-  environment; never commit tokens).
+- `paper/`: LaTeX source (`main.tex`), vector figures (`fig_overview_pipeline.pdf`,
+  `fig_blur_2d.pdf`, `fig_acoustics_3d.pdf`), compiled PDF (`main.pdf`), and metadata
+  (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper`
+  (static Tectonic in `.tmp/bin`) and submitted/updated via `scripts/submit-aixiv` (reads
+  `AIXIV_GITHUB_COPILOT_TOKEN` from the environment; never commit tokens).
 - `scripts/`: tool wrappers, setup, paper scripts, and the check script; `.githooks/`: the
   pre-commit hook.
 - `README.md`: theorem statements, potential applications, file table, commit history with Lean
