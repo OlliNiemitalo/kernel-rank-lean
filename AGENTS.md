@@ -96,9 +96,14 @@
 - **Do not edit kernel-optimizer.** Prepare replacement wording in the README instead. Its
   suggested citation is pinned to the immutable commit `240dea0` (the recommended canonical
   proof of the original theorem); do not repoint it silently.
-- **README style:** self-contained explanations; define terms before using numbers; avoid
-  references to the conversation or to transient states; in GitHub Markdown math use
-  `\mathrm{...}` (never `\operatorname{...}`).
+- **README and paper style:** self-contained explanations; define terms before using numbers;
+  avoid references to the conversation or to transient states; in GitHub Markdown math use
+  `\mathrm{...}` (never `\operatorname{...}`). Actively counteract two common academic-writing
+  biases: (1) never overstate results, cherry-pick baselines (always compare against strong
+  competitors such as `cuFFT` `rfft2`/`rfftn` and 1-pass `IWB`, not just $O(W^d)$ spatial
+  convolutions), or hide limitations and priority uncertainties; and (2) do not omit short
+  "obvious" intermediate explanations to sound expert—spell out elementary bridges so readers
+  from adjacent fields can follow without guesswork.
 - Commits end with the trailer
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`. Commit only when
   asked; do not push unless asked.
@@ -137,6 +142,12 @@
   Alder–Strassen peeling on `RealExpSpace m_R m_C` (`cplxTruncForm_rank_ge`, `realExpForm_rank_ge`)
   proves the matching lower bound `multiTotalCost d cs`, specializing to both `gaussianTotalCost`
   (`r + d * c`) and 2-D `totalCost`.
+- General `d`-D multi-Gaussian border-rank bound (`Defs`, `Main`, `d ≥ 2`): `borderTotalCost d cs`
+  charges `deg P + 1` per real rate and `d (deg P + 1)` per nonreal rate, satisfying
+  `multiTotalCost d cs = borderTotalCost d cs + (d - 2) * ∑ c ← cs, c.poly.natDegree`
+  (`multiTotalCost_eq_borderTotalCost_add`). Substituting `u_h(s) = (exp(h s) - 1) / h` into
+  `P(s)` constructs multi-Gaussian kernels of real rank at most `borderTotalCost d cs` converging
+  uniformly on compact sets (`exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`).
 
 ## Mathematics of the nonstandard proofs
 

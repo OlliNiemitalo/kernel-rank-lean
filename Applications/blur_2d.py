@@ -291,32 +291,38 @@ def orthogonal_rowspan_channels_1d(H_raw: np.ndarray, V_raw: np.ndarray):
     return H_orth, V_orth
 
 
+def linear_to_srgb(x: np.ndarray) -> np.ndarray:
+    """Exact IEC 61966-2-1 linear-light [0, 1] to sRGB [0, 1] transfer function."""
+    c = np.clip(x, 0.0, 1.0)
+    return np.where(c <= 0.0031308, 12.92 * c, 1.055 * np.power(np.maximum(c, 1e-12), 1.0 / 2.4) - 0.055)
+
+
 def make_bokeh_test_image(H_img: int = 512, W_img: int = 512, seed: int = 7) -> np.ndarray:
-    """Create a 2-D test scene with smooth gradients, sharp edges, and bright HDR glints (up to 8.0)."""
+    """
+    Create a realistic scene-linear HDR test image:
+      - Smooth background spanning deep night shadows (0.001 linear, inside the 12.92x sRGB toe)
+        up to lit midtones (0.75 linear), plus a sharp circular object edge;
+      - 25 bright 3x3 HDR point glints (linear radiance 8..48, so blurring over a disc of radius
+        R_px = 25, area pi*25^2 ~= 1963 px, yields visible bokeh discs of 0.04..0.22 linear = 0.22..0.51 sRGB).
+    """
     rng = np.random.default_rng(seed)
     yy, xx = np.meshgrid(np.linspace(-1, 1, H_img), np.linspace(-1, 1, W_img), indexing="ij")
-    img = 0.25 + 0.20 * np.sin(3.0 * xx) * np.cos(2.5 * yy)
-    img += 0.35 * ((xx**2 + yy**2) < 0.22).astype(np.float64)
-    # Add 25 bright point-like specular highlights ("night street lights" for bokeh discs!)
+    img = 0.001 + 0.45 * np.power(0.5 + 0.5 * np.sin(2.5 * xx) * np.cos(2.0 * yy), 2.5)
+    img += 0.30 * ((xx**2 + yy**2) < 0.20).astype(np.float64)
     for _ in range(25):
         cy = rng.integers(48, H_img - 48)
         cx = rng.integers(48, W_img - 48)
-        amp = rng.uniform(2.0, 8.0)
+        amp = rng.uniform(8.0, 48.0)
         img[cy - 1 : cy + 2, cx - 1 : cx + 2] += amp
     return img
 
 
 def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac: np.ndarray, dtype):
     """
-    Simulate 2-D separable blur exactly as in GPU channel accumulation:
-      acc = 0
-      for n in 0..N-1:
-        m = conv_x(img, H_fac[n])   # stored in `dtype` (fp16 or fp32 or fp64)
-        acc = dtype(acc + conv_y(m, V_fac[n]))
-    Normalized by kernel sum.
+    Simulate 2-D separable blur in scene-linear light and measure 8-bit sRGB display error
+    |sRGB(clip(acc_lp, 0, 1)) - sRGB(clip(acc_fp64, 0, 1))| (plus linear-light max error).
     """
     ksum = float(np.sum(H_fac @ np.ones(H_fac.shape[1]) * (V_fac @ np.ones(V_fac.shape[1]))))
-    # Fold normalization equally into H and V so total kernel integrates to 1!
     s_norm = 1.0 / math.sqrt(abs(ksum))
     Hn = H_fac * s_norm
     Vn = V_fac * (s_norm if ksum > 0 else -s_norm)
@@ -325,7 +331,7 @@ def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac:
     L = Hn.shape[1] // 2
     img_t = torch.tensor(img[None, None, :, :], device=device, dtype=torch.float64)
 
-    # Exact float64 reference
+    # Exact float64 linear-light reference
     acc64 = torch.zeros_like(img_t)
     for n in range(Hn.shape[0]):
         hx = torch.tensor(Hn[n][None, None, None, :], device=device, dtype=torch.float64)
@@ -342,12 +348,15 @@ def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac:
         m_lp = F.conv2d(F.pad(img_lp, (L, L, 0, 0), mode="replicate"), hx)
         acc_lp = acc_lp + F.conv2d(F.pad(m_lp, (0, 0, L, L), mode="replicate"), vy)
 
-    diff = (acc_lp.to(torch.float64) - acc64).cpu().numpy()[0, 0]
-    if not np.all(np.isfinite(diff)):
-        return float("inf"), float("inf")
-    rmse = float(np.sqrt(np.mean(diff**2)))
-    max_err = float(np.max(np.abs(diff)))
-    return rmse, max_err
+    a64 = acc64.cpu().numpy()[0, 0]
+    alp = acc_lp.to(torch.float64).cpu().numpy()[0, 0]
+    if not np.all(np.isfinite(alp)):
+        return float("inf"), float("inf"), float("inf")
+    srgb_diff = np.abs(linear_to_srgb(alp) - linear_to_srgb(a64))
+    srgb_rmse = float(np.sqrt(np.mean(srgb_diff**2)))
+    srgb_max = float(np.max(srgb_diff))
+    lin_max = float(np.max(np.abs(alp - a64)))
+    return srgb_rmse, srgb_max, lin_max
 
 
 @triton.jit
@@ -404,8 +413,171 @@ def sym_blur2d_y_accum_kernel(
         tl.store(acc_ptr + y_id * stride_y + offs_wc, (prev + val).to(acc_ptr.dtype.element_ty), mask=mask)
 
 
-def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(16, 32), ranks=(4, 8)):
-    """Benchmark 1920x1080 RGBA 2-D blur on RTX 4070 Ti Super: Direct WxW vs Triton Separable fp32 & fp16."""
+def optimize_discrete_disc_rank_r(R_px: int, R_rank: int, K_seed: np.ndarray, tau: float = 0.2, shell_isotropic: bool = False):
+    """
+    Compare sampled continuous complex-Gaussian disc kernels against three direct discrete rank-R methods
+    on {-L, ..., L}^2 (L = ceil((1 + tau) * R_px)):
+      1) Direct SVD (Eckart-Young l_2-optimal rank-R truncation of raised-cosine smooth disc on [1, 1+tau]);
+      2) Unconstrained discrete rank-R minimax (POCS + bisection minimizing max_{r<=1 or r>=1+tau} |K - 1_{r<=1}|);
+      3) Shell-isotropic discrete rank-R minimax (additionally projecting onto equal-Euclidean-radius shells).
+    """
+    L = math.ceil((1.0 + tau) * R_px)
+    m = np.arange(-L, L + 1, dtype=np.float64)
+    mx, my = np.meshgrid(m, m, indexing="ij")
+    n2 = (mx**2 + my**2).astype(np.int64)
+    r = np.sqrt(n2) / R_px
+    mask_ps = (r <= 1.0) | (r >= 1.0 + tau)
+    tgt = (r <= 1.0).astype(np.float64)
+
+    # Raised-cosine smooth disc for direct SVD baseline
+    K_rc = np.zeros_like(r)
+    K_rc[r <= 1.0] = 1.0
+    m_tr = (r > 1.0) & (r < 1.0 + tau)
+    K_rc[m_tr] = 0.5 * (1.0 + np.cos(math.pi * (r[m_tr] - 1.0) / tau))
+    U_rc, s_rc, Vt_rc = np.linalg.svd(K_rc, full_matrices=False)
+    s_rc_trunc = s_rc.copy()
+    s_rc_trunc[R_rank:] = 0.0
+    K_svd = (U_rc * s_rc_trunc) @ Vt_rc
+    K_svd = 0.5 * (K_svd + K_svd.T)
+    K_svd = 0.25 * (K_svd + K_svd[::-1, :] + K_svd[:, ::-1] + K_svd[::-1, ::-1])
+    U_s, s_s, Vt_s = np.linalg.svd(K_svd, full_matrices=False)
+    s_s[R_rank:] = 0.0
+    K_svd = (U_s * s_s) @ Vt_s
+
+    if L + 1 <= R_rank:
+        # Every even symmetric matrix on {-L..L}^2 has rank <= L + 1 <= R_rank!
+        return K_svd, K_rc.copy()
+
+    uniq_n2, inv_n2 = np.unique(n2.ravel(), return_inverse=True)
+    counts_n2 = np.bincount(inv_n2)
+
+    rip_seed = float(np.max(np.abs(K_seed[mask_ps] - tgt[mask_ps])))
+    lo, hi = 0.0, rip_seed
+    M_best = K_seed.copy()
+    best_rip = rip_seed
+    n_iters = 240 if shell_isotropic else 140
+    for _ in range(14):
+        mid = 0.5 * (lo + hi)
+        M = M_best.copy()
+        for _it in range(n_iters):
+            if shell_isotropic:
+                shell_avg = np.bincount(inv_n2, weights=M.ravel()) / counts_n2
+                M = shell_avg[inv_n2].reshape(M.shape)
+            else:
+                # Preserve D_4 axis/diagonal symmetry so discrete stencil is symmetric
+                M = 0.5 * (M + M.T)
+                M = 0.25 * (M + M[::-1, :] + M[:, ::-1] + M[::-1, ::-1])
+            M[mask_ps] = tgt[mask_ps] + np.clip(M[mask_ps] - tgt[mask_ps], -mid, mid)
+            U, s, Vt = np.linalg.svd(M, full_matrices=False)
+            s[R_rank:] = 0.0
+            M = (U * s) @ Vt
+        M = 0.5 * (M + M.T)
+        M = 0.25 * (M + M[::-1, :] + M[:, ::-1] + M[::-1, ::-1])
+        U, s, Vt = np.linalg.svd(M, full_matrices=False)
+        s[R_rank:] = 0.0
+        M_rk = (U * s) @ Vt
+        ach_rip = float(np.max(np.abs(M_rk[mask_ps] - tgt[mask_ps])))
+        if shell_isotropic:
+            shell_avg = np.bincount(inv_n2, weights=M_rk.ravel()) / counts_n2
+            M_rad = shell_avg[inv_n2].reshape(M_rk.shape)
+            aniso_err = float(np.max(np.abs(M_rk - M_rad)))
+            ok = (ach_rip <= mid + 2e-4) and (aniso_err <= 2e-4)
+        else:
+            ok = ach_rip <= mid + 1.5e-4
+        if ok:
+            if ach_rip <= best_rip:
+                best_rip = ach_rip
+                M_best = M_rk
+            hi = min(hi, ach_rip)
+        else:
+            lo = mid
+    return K_svd, M_best
+
+
+def measure_kernel_anisotropy(K: np.ndarray, R_px: int, tau: float = 0.2):
+    """Return (pass_stop_ripple, equal_radius_shell_spread, rim_shell_spread, dtft_anisotropy)."""
+    L = K.shape[0] // 2
+    m = np.arange(-L, L + 1, dtype=np.float64)
+    mx, my = np.meshgrid(m, m, indexing="ij")
+    n2 = (mx**2 + my**2).astype(np.int64)
+    r = np.sqrt(n2) / R_px
+    mask_ps = (r <= 1.0) | (r >= 1.0 + tau)
+    tgt = (r <= 1.0).astype(np.float64)
+    rip = float(np.max(np.abs(K[mask_ps] - tgt[mask_ps])))
+
+    max_shell = 0.0
+    max_rim = 0.0
+    for val in np.unique(n2):
+        rn = math.sqrt(val) / R_px
+        pts = K[n2 == val]
+        if len(pts) > 1 and rn <= math.sqrt(2.0) * (1.0 + tau):
+            sp = float(np.max(pts) - np.min(pts))
+            max_shell = max(max_shell, sp)
+            if 1.0 < rn < 1.0 + tau:
+                max_rim = max(max_rim, sp)
+
+    k0 = abs(float(np.sum(K)))
+    thetas = np.linspace(0.0, 0.25 * math.pi, 25)
+    max_dtft = 0.0
+    for kr in np.linspace(0.05, math.pi, 40):
+        vals = [float(np.sum(K * np.cos(kr * math.cos(th) * mx) * np.cos(kr * math.sin(th) * my))) for th in thetas]
+        max_dtft = max(max_dtft, (max(vals) - min(vals)) / max(k0, 1e-12))
+    return {
+        "ripple": rip,
+        "shell_aniso": max_shell,
+        "rim_aniso": max_rim,
+        "dtft_aniso": max_dtft,
+    }
+
+
+def evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2, 4, 8, 12)):
+    """Compare sampled continuous Gaussians vs direct SVD, unconstrained discrete minimax, and shell-isotropic minimax."""
+    rank_to_lbl = {2: "1c (Gaussian)", 4: "2c (Gaussian)", 8: "4c (Gaussian)", 12: "6c (Gaussian)"}
+    rows = []
+    saved_kernels = {}
+    for R_px in radii:
+        L = math.ceil(1.2 * R_px)
+        x = np.arange(-L, L + 1, dtype=np.float64) / R_px
+        r2 = x[:, None] ** 2 + x[None, :] ** 2
+        for R_rank in ranks:
+            fam = next(f for f in families if f["label"] == rank_to_lbl[R_rank])
+            K_cont = eval_components_profile(r2.ravel(), fam["components"]).reshape(r2.shape)
+            K_svd, K_uncon = optimize_discrete_disc_rank_r(R_px, R_rank, K_cont, tau=0.2, shell_isotropic=False)
+            _, K_iso = optimize_discrete_disc_rank_r(R_px, R_rank, K_cont, tau=0.2, shell_isotropic=True)
+            m_cont = measure_kernel_anisotropy(K_cont, R_px)
+            m_svd = measure_kernel_anisotropy(K_svd, R_px)
+            m_uncon = measure_kernel_anisotropy(K_uncon, R_px)
+            m_iso = measure_kernel_anisotropy(K_iso, R_px)
+            row = {
+                "radius_px": R_px,
+                "W_tap": 2 * L + 1,
+                "even_dim": L + 1,
+                "rank_R": R_rank,
+                "cont": m_cont,
+                "svd": m_svd,
+                "disc_uncon": m_uncon,
+                "disc_iso": m_iso,
+            }
+            rows.append(row)
+            print(
+                f"DiscVsCont R_px={R_px:2d} (L+1={L+1:2d}), R={R_rank:2d} | "
+                f"Cont rip={m_cont['ripple']:.4f} | SVD rip={m_svd['ripple']:.4f} (aniso={m_svd['shell_aniso']:.3f}) | "
+                f"Uncon rip={m_uncon['ripple']:.4f} (aniso={m_uncon['shell_aniso']:.3f}) | Iso rip={m_iso['ripple']:.4f}"
+            )
+            if R_rank == 4 and R_px in (6, 25):
+                saved_kernels[f"Rpx{R_px}_R4"] = {
+                    "cont": K_cont.tolist(),
+                    "svd": K_svd.tolist(),
+                    "disc_uncon": K_uncon.tolist(),
+                    "disc_iso": K_iso.tolist(),
+                }
+    return {"summary": rows, "kernels_R4": saved_kernels}
+
+
+def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12)):
+    """Benchmark 1920x1080 RGBA 2-D blur on RTX 4070 Ti Super: Direct WxW, cuFFT rfft2 (zero- & replicate-padded), and Triton Separable."""
+    from scipy.fft import next_fast_len
+
     device = torch.device("cuda")
     C = 4
     inp32 = torch.randn((H_img, W_img, C), device=device, dtype=torch.float32)
@@ -415,7 +587,8 @@ def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(16, 32), r
     for R_px in radii:
         L = math.ceil(R_px * 1.2)
         W_tap = 2 * L + 1
-        # Direct 2-D depthwise conv2d in fp32
+
+        # 1. Direct 2-D depthwise conv2d in fp32 (replicate-clamped borders)
         k2d = torch.randn((C, 1, W_tap, W_tap), device=device, dtype=torch.float32)
         for _ in range(4):
             F.conv2d(F.pad(inp_nchw, (L, L, L, L), mode="replicate"), k2d, groups=C)
@@ -427,8 +600,46 @@ def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(16, 32), r
         torch.cuda.synchronize()
         ms_direct = 1000.0 * (time.perf_counter() - t0) / n_dir
 
+        # 2a. Zero-padded cuFFT rfft2/irfft2 (linear convolution with precomputed filter spectrum)
+        Hz = next_fast_len(H_img + W_tap - 1)
+        Wz = next_fast_len(W_img + W_tap - 1)
+        kz_hat = torch.randn((1, 1, Hz, Wz // 2 + 1), device=device, dtype=torch.complex64)
+        for _ in range(10):
+            _ = torch.fft.irfft2(torch.fft.rfft2(inp_nchw, s=(Hz, Wz)) * kz_hat, s=(Hz, Wz))[:, :, :H_img, :W_img]
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(50):
+            _ = torch.fft.irfft2(torch.fft.rfft2(inp_nchw, s=(Hz, Wz)) * kz_hat, s=(Hz, Wz))[:, :, :H_img, :W_img]
+        torch.cuda.synchronize()
+        ms_fft2_zero = 1000.0 * (time.perf_counter() - t0) / 50.0
+
+        # 2b. Replicate-padded cuFFT rfft2/irfft2 (exact same clamped border semantics as Direct & Triton!)
+        Hr = next_fast_len(H_img + 2 * L + W_tap - 1)
+        Wr = next_fast_len(W_img + 2 * L + W_tap - 1)
+        kr_hat = torch.randn((1, 1, Hr, Wr // 2 + 1), device=device, dtype=torch.complex64)
+        for _ in range(10):
+            pad_in = F.pad(inp_nchw, (L, L, L, L), mode="replicate")
+            _ = torch.fft.irfft2(torch.fft.rfft2(pad_in, s=(Hr, Wr)) * kr_hat, s=(Hr, Wr))[:, :, 2 * L : 2 * L + H_img, 2 * L : 2 * L + W_img]
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(50):
+            pad_in = F.pad(inp_nchw, (L, L, L, L), mode="replicate")
+            _ = torch.fft.irfft2(torch.fft.rfft2(pad_in, s=(Hr, Wr)) * kr_hat, s=(Hr, Wr))[:, :, 2 * L : 2 * L + H_img, 2 * L : 2 * L + W_img]
+        torch.cuda.synchronize()
+        ms_fft2_rep = 1000.0 * (time.perf_counter() - t0) / 50.0
+
         for N_rank in ranks:
-            row = {"radius_px": R_px, "L": L, "W_tap": W_tap, "rank_N": N_rank, "ms_direct_fp32": ms_direct}
+            row = {
+                "radius_px": R_px,
+                "L": L,
+                "W_tap": W_tap,
+                "rank_N": N_rank,
+                "fft_shape_zero": [Hz, Wz],
+                "fft_shape_rep": [Hr, Wr],
+                "ms_direct_fp32": ms_direct,
+                "ms_rfft2_zero_fp32": ms_fft2_zero,
+                "ms_rfft2_rep_fp32": ms_fft2_rep,
+            }
             grid = (H_img, triton.cdiv(W_img * C, 512))
             for dtype, key in [(torch.float32, "ms_sep_fp32"), (torch.float16, "ms_sep_fp16")]:
                 inp_d = inp32.to(dtype)
@@ -454,8 +665,8 @@ def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(16, 32), r
                 row[key] = 1000.0 * (time.perf_counter() - t0) / iters
             print(
                 f"1920x1080 RGBA R_px={R_px} (W={W_tap}), N={N_rank}: "
-                f"Direct={ms_direct:.2f} ms | Sep fp32={row['ms_sep_fp32']:.3f} ms ({ms_direct/row['ms_sep_fp32']:.1f}x) | "
-                f"Sep fp16={row['ms_sep_fp16']:.3f} ms ({ms_direct/row['ms_sep_fp16']:.1f}x)"
+                f"Direct={ms_direct:.2f} ms | cuFFT(zero/rep)={ms_fft2_zero:.2f}/{ms_fft2_rep:.2f} ms | "
+                f"Sep fp32={row['ms_sep_fp32']:.3f} ms | Sep fp16={row['ms_sep_fp16']:.3f} ms"
             )
             results.append(row)
     return results
@@ -534,7 +745,7 @@ def main():
     bokeh_img = make_bokeh_test_image(512, 512)
     conditioning_rows = []
 
-    print("\n=== Conditioning & float16 Bokeh Precision (R_px=25, W=61, HDR peak=8.0) ===")
+    print("\n=== Conditioning & float16 sRGB Bokeh Precision (R_px=25, W=61, HDR peak=48.0) ===")
     for fam in families:
         comps = fam["components"]
         H_raw, V_raw = per_component_channels_1d(x_grid, comps, S=1.2)
@@ -553,8 +764,8 @@ def main():
         amp_raw = float(np.sum(np.max(np.abs(H_raw), axis=1) * np.max(np.abs(V_raw), axis=1)) / k_peak)
         amp_orth = float(np.sum(np.max(np.abs(H_orth), axis=1) * np.max(np.abs(V_orth), axis=1)) / k_peak)
 
-        rmse_raw16, max_raw16 = simulate_separable_blur_precision(bokeh_img, H_raw, V_raw, torch.float16)
-        rmse_orth16, max_orth16 = simulate_separable_blur_precision(bokeh_img, H_orth, V_orth, torch.float16)
+        rmse_raw16, max_raw16, lin_raw16 = simulate_separable_blur_precision(bokeh_img, H_raw, V_raw, torch.float16)
+        rmse_orth16, max_orth16, lin_orth16 = simulate_separable_blur_precision(bokeh_img, H_orth, V_orth, torch.float16)
 
         row = {
             "label": fam["label"],
@@ -569,6 +780,8 @@ def main():
             "fp16_max_raw_255": 255.0 * max_raw16,
             "fp16_rmse_orth_255": 255.0 * rmse_orth16,
             "fp16_max_orth_255": 255.0 * max_orth16,
+            "fp16_lin_max_raw_255": 255.0 * lin_raw16,
+            "fp16_lin_max_orth_255": 255.0 * lin_orth16,
         }
         conditioning_rows.append(row)
         print(
@@ -578,8 +791,11 @@ def main():
             f"(max {255*max_raw16:9.2f} -> {255*max_orth16:5.2f})"
         )
 
+    print("\n=== Direct Discrete Optimization vs Sampled Continuous Profiles ===")
+    disc_vs_cont = evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2, 4, 8, 12))
+
     print("\n=== RTX 4070 Ti Super 2-D Blur Throughput ===")
-    gpu_bench = benchmark_blur2d_gpu(1080, 1920, radii=(16, 32, 64), ranks=(4, 8, 12))
+    gpu_bench = benchmark_blur2d_gpu(1080, 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12))
 
     # Save curves for Figure 1 as well
     r_plot = np.linspace(0.0, 1.85, 600)
@@ -595,6 +811,7 @@ def main():
             {
                 "families": families,
                 "conditioning": conditioning_rows,
+                "discrete_vs_continuous": disc_vs_cont,
                 "gpu_benchmark": gpu_bench,
                 "profile_curves": curves,
             },

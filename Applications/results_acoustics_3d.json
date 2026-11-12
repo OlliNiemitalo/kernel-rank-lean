@@ -2972,6 +2972,20 @@
       }
     },
     {
+      "name": "k-space cuFFT (periodic, nu=1.00)",
+      "nu": 1.0,
+      "n_steps": 72,
+      "rel_l2": {
+        "axial": 0.0035304992432482756,
+        "face_diag": 8.414909227690546e-05,
+        "body_diag": 3.647352227447752e-05
+      },
+      "max_rel_l2": 0.0035304992432482756,
+      "ct": null,
+      "traces": null,
+      "exact_traces": null
+    },
+    {
       "name": "Rank-4 (1c+1r, nu=0.75)",
       "nu": 0.75,
       "n_steps": 96,
@@ -55026,6 +55040,13 @@
       "rank": 1,
       "ms_fp32": 0.3231623402098194,
       "gvox_fp32": 51.91575227827311
+    },
+    {
+      "name": "k-space rfftn/irfftn (periodic cuFFT)",
+      "W": 256,
+      "rank": null,
+      "ms_fp32": 2.734365674405126,
+      "gvox_fp32": 6.1356884914999394
     },
     {
       "label": "Rank-4 (1c+1r, nu=0.75)",

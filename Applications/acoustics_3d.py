@@ -740,6 +740,7 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
         {"name": "7-pt FDTD (nu=1/sqrt3)", "kind": "fdtd7", "nu": 1.0 / math.sqrt(3.0), "inter": torch.float32},
         {"name": "27-pt IWB (nu=0.75)", "kind": "iwb27", "nu": 0.75, "inter": torch.float32},
         {"name": "27-pt IWB (nu=1.00)", "kind": "iwb27", "nu": 1.00, "inter": torch.float32},
+        {"name": "k-space cuFFT (periodic, nu=1.00)", "kind": "kspace", "nu": 1.00, "inter": torch.float32},
     ]
     for prop in propagators:
         sim_cases.append({"name": prop["label"], "kind": "sep", "prop": prop, "nu": prop["nu"], "inter": torch.float32})
@@ -771,6 +772,14 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
             buf2 = torch.empty((G, G, G), device=device, dtype=case["inter"])
             acc = torch.empty((G, G, G), device=device, dtype=torch.float32)
 
+        elif case["kind"] == "kspace":
+            kf_full = 2.0 * math.pi * torch.fft.fftfreq(G, device=device, dtype=torch.float64)
+            kf_r = 2.0 * math.pi * torch.fft.rfftfreq(G, device=device, dtype=torch.float64)
+            kx_g, ky_g, kz_g = torch.meshgrid(kf_full, kf_full, kf_r, indexing="ij")
+            kmag_g = torch.sqrt(kx_g**2 + ky_g**2 + kz_g**2)
+            m_hat_exact = (2.0 * torch.cos(nu * kmag_g)).to(torch.float32)
+            del kx_g, ky_g, kz_g, kmag_g
+
         traces = {k: [float(p0_np[c_idx + dx, c_idx + dy, c_idx + dz]), float(p1_np[c_idx + dx, c_idx + dy, c_idx + dz])]
                   for k, (dx, dy, dz) in rec_offsets.items()}
         ct_times = [0.0, nu]
@@ -784,6 +793,8 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
                 fdtd7_triton_kernel[grid_2d](p_curr, p_prev, p_next, nu**2, G=G, BLOCK_Z=256)
             elif case["kind"] == "iwb27":
                 iwb27_triton_kernel[grid_2d](p_curr, p_prev, p_next, nu**2, G=G, BLOCK_Z=256)
+            elif case["kind"] == "kspace":
+                p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat_exact, s=(G, G, G)) - p_prev)
             else:
                 step_separable_triton(p_curr, p_prev, p_next, buf1, buf2, acc, gpu_facs, alpha0, G, L)
 
@@ -908,6 +919,19 @@ def benchmark_3d_gpu(propagators, G: int = 256):
     ms27 = 1000.0 * (time.perf_counter() - t0) / 100.0
     bench.append({"name": "27-pt IWB (1-pass Triton)", "W": 3, "rank": 1, "ms_fp32": ms27, "gvox_fp32": (G**3 / 1e9) / (ms27 / 1000.0)})
     print(f"Bench 256^3 27-pt IWB (1-pass Triton): {ms27:.3f} ms/step ({(G**3/1e9)/(ms27/1000.0):.2f} GVox/s)")
+
+    # 2b. Periodic k-space pseudospectral baseline (torch.fft.rfftn / irfftn writing into p_next)
+    m_hat3 = torch.randn((G, G, G // 2 + 1), device=device, dtype=torch.float32)
+    for _ in range(15):
+        p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat3, s=(G, G, G)) - p_prev)
+    torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    for _ in range(80):
+        p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat3, s=(G, G, G)) - p_prev)
+    torch.cuda.synchronize()
+    ms_kspace = 1000.0 * (time.perf_counter() - t0) / 80.0
+    bench.append({"name": "k-space rfftn/irfftn (periodic cuFFT)", "W": G, "rank": None, "ms_fp32": ms_kspace, "gvox_fp32": (G**3 / 1e9) / (ms_kspace / 1000.0)})
+    print(f"Bench 256^3 k-space rfftn/irfftn (periodic cuFFT): {ms_kspace:.3f} ms/step ({(G**3/1e9)/(ms_kspace/1000.0):.2f} GVox/s)")
 
     # 3. Direct W^3 conv3d vs Naive vs Exact Triton (fp32 & fp16-inter) for each unique (L, rank_exact, rank_naive)
     seen = set()

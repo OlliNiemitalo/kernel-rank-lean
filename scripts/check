@@ -27,6 +27,8 @@ lean_theorems=(
   KernelRank.separableRank_radial_profile
   KernelRank.separableRank_radial_gaussian_profile
   KernelRank.separableRank_radial_gaussian_eq_iff
+  KernelRank.multiTotalCost_eq_borderTotalCost_add
+  KernelRank.exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile
   KernelRank.separableRank_radial_sq_mul_cos
   KernelRank.separableRank_radial_sq_mul_cos_complex
   KernelRank.exists_rank_le_two_mul_tendstoUniformlyOn_radial_sq_mul_cos

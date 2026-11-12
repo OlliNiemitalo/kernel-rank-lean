@@ -50,25 +50,6 @@ lemma IsSumOfProducts.finsetSum {𝕜 : Type*} [CommSemiring 𝕜] {ι α : Type
   exact ((e.symm.sum_comp (fun p : Σ a, Fin (N a) => ∏ i, f p.1 p.2 i (x i))).trans
     (Fintype.sum_sigma _)).symm
 
-lemma IsSumOfProducts.smul {𝕜 : Type*} [CommSemiring 𝕜] {ι : Type*} [Fintype ι] [Nonempty ι]
-    {X : ι → Type*} {K : (∀ i, X i) → 𝕜} {N : ℕ} (c : 𝕜) (hK : IsSumOfProducts K N) :
-    IsSumOfProducts (fun x => c * K x) N := by
-  classical
-  obtain ⟨i₀⟩ := ‹Nonempty ι›
-  obtain ⟨f, hf⟩ := hK
-  refine ⟨fun n i x => if i = i₀ then c * f n i x else f n i x, fun x => ?_⟩
-  dsimp only
-  rw [hf x, Finset.mul_sum]
-  refine Finset.sum_congr rfl fun n _ => ?_
-  rw [← Finset.mul_prod_erase Finset.univ (fun i => f n i (x i)) (Finset.mem_univ i₀),
-    ← Finset.mul_prod_erase Finset.univ _ (Finset.mem_univ i₀)]
-  have her : ∏ i ∈ Finset.univ.erase i₀,
-      (if i = i₀ then c * f n i (x i) else f n i (x i)) =
-      ∏ i ∈ Finset.univ.erase i₀, f n i (x i) :=
-    Finset.prod_congr rfl fun i hi => by simp [Finset.ne_of_mem_erase hi]
-  rw [her]
-  simp [mul_assoc]
-
 lemma IsSumOfProducts.add {𝕜 : Type*} [CommSemiring 𝕜] {ι : Type*} [Fintype ι]
     {X : ι → Type*} {K₁ K₂ : (∀ i, X i) → 𝕜} {N₁ N₂ : ℕ}
     (h₁ : IsSumOfProducts K₁ N₁) (h₂ : IsSumOfProducts K₂ N₂) :
@@ -181,6 +162,18 @@ lemma multiCost_of_isGaussian (d : ℕ) {c : Component} (hg : c.IsGaussian) :
   unfold IsGaussian at hg
   simp [multiCost, gaussianCost, hg]
 
+/-- Multi-Gaussian border-rank upper bound of a component in `d` dimensions: `deg P + 1` real
+Gaussians when `Im λ = 0`, and `d * (deg P + 1)` real products (from `deg P + 1` complex
+Gaussians) when `Im λ ≠ 0`. -/
+noncomputable def borderCost (d : ℕ) (c : Component) : ℕ :=
+  if c.rate.im = 0 then c.poly.natDegree + 1 else d * (c.poly.natDegree + 1)
+
+lemma multiCost_eq_borderCost_add {d : ℕ} (hd : 2 ≤ d) (c : Component) :
+    c.multiCost d = c.borderCost d + (d - 2) * c.poly.natDegree := by
+  unfold multiCost borderCost
+  have hd1 : 1 ≤ d := by omega
+  split_ifs <;> zify [hd, hd1] <;> ring
+
 /-- A well-formed component: a nonzero polynomial, a rate in the closed upper half-plane (a rate
 and its conjugate give the same components), and real coefficients when the rate is real. -/
 def WellFormed (c : Component) : Prop :=
@@ -203,6 +196,24 @@ noncomputable def gaussianTotalCost (d : ℕ) (cs : List Component) : ℕ :=
 /-- The total number of `d`-D rendering terms of a list of arbitrary components (`d ≥ 2`). -/
 noncomputable def multiTotalCost (d : ℕ) (cs : List Component) : ℕ :=
   (cs.map (Component.multiCost d)).sum
+
+/-- Total multi-Gaussian border-rank upper bound of a list of components in `d` dimensions. -/
+noncomputable def borderTotalCost (d : ℕ) (cs : List Component) : ℕ :=
+  (cs.map (Component.borderCost d)).sum
+
+/-- Exact-minus-border rank gap identity (`d ≥ 2`): for every component list `cs`,
+`multiTotalCost d cs = borderTotalCost d cs + (d - 2) * ∑_{c ∈ cs} deg P_c`. -/
+theorem multiTotalCost_eq_borderTotalCost_add {d : ℕ} (hd : 2 ≤ d) (cs : List Component) :
+    multiTotalCost d cs =
+      borderTotalCost d cs + (d - 2) * (cs.map fun c => c.poly.natDegree).sum := by
+  induction cs with
+  | nil => simp [multiTotalCost, borderTotalCost]
+  | cons c cs ih =>
+    change c.multiCost d + multiTotalCost d cs =
+      (c.borderCost d + borderTotalCost d cs) +
+        (d - 2) * (c.poly.natDegree + (cs.map fun c => c.poly.natDegree).sum)
+    rw [c.multiCost_eq_borderCost_add hd, ih]
+    ring
 
 lemma multiTotalCost_two (cs : List Component) : multiTotalCost 2 cs = totalCost cs := by
   unfold multiTotalCost totalCost

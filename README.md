@@ -61,6 +61,18 @@ and any dimension `d ≥ 2`:
    * **Two dimensions (`d = 2`, `separableRank_radial_two_eq_iff`):** `multiTotalCost 2 cs =
      totalCost cs` (`k + 1` for real `λ`, `2 (k + 1)` for nonreal `λ`).
 
+4. **General `d`-D multi-Gaussian border-rank bound and gap (`multiTotalCost_eq_borderTotalCost_add`,
+   `exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`):** for any list `cs` of
+   well-formed components (`borderTotalCost d cs`: `deg P + 1` per real rate, `d (deg P + 1)` per
+   nonreal rate),
+   ```lean
+   multiTotalCost d cs = borderTotalCost d cs + (d - 2) * ∑ c ← cs, c.poly.natDegree
+   ```
+   and replacing `s` inside each `P(s)` by `(exp(h s) - 1) / h` constructs multi-Gaussian radial
+   kernels of real rank at most `borderTotalCost d cs` converging uniformly on every compact set
+   `C ⊆ ℝ^d` as `h → 0` (`h ≠ 0`). In particular, `‖x‖² cos(‖x‖²)` has exact complex rank `2 d`,
+   exact real rank `3 d - 2`, and compact-open real border rank at most `2 d`.
+
 The proof in the `KernelRankLean` library is complete (no `sorry`); `#print axioms` reports
 only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library and the
 `Isabelle` directory hold alternative proofs of one step, also complete, described
@@ -107,9 +119,13 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   peak channel cancellation at `N = 12`, producing `4.4`–`6.8 / 255` HDR bokeh errors in IEEE
   `float16` intermediates; orthonormalizing `rowSpan(K)` via QR + symmetric eigendecomposition
   ([`Applications/blur_2d.py`](Applications/blur_2d.py)) achieves the global nuclear-norm minimum
-  max error at `≤ 0.17 / 255` (`11.3×`–`34.3×` faster than direct `155 × 155` 2-D convolution at
-  `1920 × 1080` RGBA on an RTX 4070 Ti Super), in contrast to `d ≥ 3` where minimal CP
-  decompositions lack transitive `GL_R(ℝ)` cross-component rotation freedom.
+  for `∑_n ‖h_n‖₂ ‖v_n‖₂` and reduces `float16` 8-bit sRGB HDR bokeh max error from `9.4`–`14.8 / 255`
+  at `N = 12` to `≤ 0.33 / 255` across all 18 families (`11.7×`–`35.6×`
+  faster than direct `155 × 155` 2-D convolution at `1920 × 1080` RGBA on an RTX 4070 Ti Super, and
+  faster than `1.22–1.34 ms` clamp-padded `cuFFT` at `R = 4` for `R_px ≤ 16` and `R = 8` for
+  `R_px = 8`, whereas `cuFFT` at `1.10–1.87 ms` is faster for purely shift-invariant larger-radius
+  or higher-rank FIR blurs), in contrast to `d ≥ 3` where minimal CP decompositions lack transitive
+  `GL_R(ℝ)` cross-component rotation freedom.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
   circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
   separable rank because of its algebraic radial decay, and can be approximated by complex-rate
@@ -124,12 +140,14 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   terms. When `φ` is a well-formed multi-Gaussian profile with `r` real and `c` nonreal
   upper-half-plane rates (all `λᵢ ≠ 0`), `φ^(m)` is again a well-formed multi-Gaussian profile at
   the same rates (weighted by `λᵢ^m`), so differentiating the continuous-space kernel on `ℝ²`
-  analytically before sampling—preserving exact isotropic derivative response up to Nyquist, as in
-  [DSP Stack Exchange #58287](https://dsp.stackexchange.com/a/58287/15347)—yields exact
-  continuous-domain 2-way real separable ranks `(⌊m / 2⌋ + 1) (r + 2 c)` for the `cos(m θ)`
-  kernel and `⌈m / 2⌉ (r + 2 c)` for the `sin(m θ)` kernel (in particular, `r + 2 c` each for the
-  `m = 1` gradient pair, with `x` or `y` absorbed directly into one 1-D factor; sampling those
-  1-D factors gives at most that many discrete pass pairs).
+  analytically before sampling—preserving exact continuous-space isotropic derivative symmetry
+  without finite-difference attenuation, as in
+  [DSP Stack Exchange #58287](https://dsp.stackexchange.com/a/58287/15347) (subject to standard
+  grid-sampling aliasing and truncation)—yields exact continuous-domain 2-way real separable ranks
+  `(⌊m / 2⌋ + 1) (r + 2 c)` for the `cos(m θ)` kernel and `⌈m / 2⌉ (r + 2 c)` for the `sin(m θ)`
+  kernel (in particular, `r + 2 c` each for the `m = 1` gradient pair, with `x` or `y` absorbed
+  directly into one 1-D factor; sampling those 1-D factors gives at most that many discrete pass
+  pairs).
 * **3-D volumetric filtering and isotropic acoustic wave simulation (`d = 3`).** In 3-D imaging
   (cryo-EM, CT, MRI) and explicit wave-equation leapfrog propagation `p^{n+1} + p^{n-1} = M * p^n`
   targeting the radial symbol `2 cos(ν ‖k‖₂)`, direct `W³` stencils scale cubically while purely
@@ -138,13 +156,16 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   center tap, incurring `9.38%` diagonal phase-velocity error by `0.80π`. Generalizing to `r` real
   and `c` complex-conjugate Gaussians (`separableRank_radial_gaussian_profile`, exact 3-way rank
   `r + 3 c` via `re_prod_eq_sum_re` vs. `r + 4 c` naive; `7` vs. `9` for `deg P = 1` via
-  `re_coeff_prod_eq_sum_re`), von Neumann-stable propagators optimized in
+  `re_coeff_prod_eq_sum_re`), propagators optimized and numerically audited for von Neumann
+  stability on a 232,620-point Brillouin-octant/shell grid in
   [`Applications/acoustics_3d.py`](Applications/acoustics_3d.py) (`R = 7`, `W = 13`, `ν = 1.00`)
   reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.049%` (extending the
   `0.1%`-accurate bandwidth from `0.085π` to `0.81π`—an analytical resolution-scaling reduction of
-  `865×` in grid voxels and `476×`–`660×` in compute time on an RTX 4070 Ti Super at equal
-  dispersion accuracy), while half-sample even reflection enforces exact rigid-wall Neumann
-  boundary conditions.
+  `865×` in grid voxels and `476×`–`660×` in compute time vs. `27`-pt `IWB` at equal `0.1%`
+  dispersion accuracy, while `1`-pass `IWB` at `0.323 ms/step` is faster when coarse dispersion is
+  acceptable and periodic `cuFFT` `k`-space propagation at `2.73 ms/step` is faster and
+  dispersion-free on homogeneous obstacle-free boxes), while half-sample even reflection enforces
+  exact rigid-wall Neumann boundary conditions.
 * **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
   Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
   sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center
@@ -163,7 +184,7 @@ The proof is in [KernelRankLean](KernelRankLean):
 
 | File | Content |
 |---|---|
-| `Defs.lean` | Multi-way separable rank, coordinate surjections, 2-D slices, components, `multiTotalCost`, 2-D and Gaussian costs |
+| `Defs.lean` | Multi-way separable rank, coordinate surjections, 2-D slices, components, `multiTotalCost`, `borderTotalCost`, 2-D and Gaussian costs |
 | `RowSpan.lean` | Two-coordinate separable rank = dimension of the span of the rows |
 | `Complexification.lean` | Scalar extension `ℝ → ℂ` bounds multi-way rank and preserves two-coordinate rank |
 | `Translations.lean` | `d`-D radial-to-Hankel equivalence, 2-D slice bound, and `translateSpan` |
@@ -177,7 +198,7 @@ The proof is in [KernelRankLean](KernelRankLean):
 | `Annihilator.lean` | 2-D rank equals the least constant-coefficient differential-annihilator order |
 | `MultiComplexRank.lean` | Exact `d`-way complex exponential-polynomial rank `∑ i, ((d - 1) deg Pᵢ + 1)` |
 | `MultiRealRank.lean` | Root-of-unity & real Lagrange decompositions; exact `d`-way real rank `multiTotalCost d cs` |
-| `Main.lean` | The `d`-D and 2-D main theorems and exact-vs.-border rank separation on `‖x‖² cos(‖x‖²)` |
+| `Main.lean` | The `d`-D and 2-D main theorems and the general `d`-D multi-Gaussian border-rank theorem |
 
 Outside the proof:
 
@@ -214,7 +235,8 @@ size, not mathematical complexity.
 | [`cae13d6`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/cae13d6897f6ce6ef43b86129d938842b0349683) | Use product annihilators and Cayley–Hamilton; delete coefficient-synthesis and cyclic-vector machinery | 1,587 | 1,380 | -93 |
 | [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
 | [`9722ff5`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/9722ff5b2e2f788874a99378165af2206f0d7d42) | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
-| This revision | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
+| [`1094bf1`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/1094bf1b76f37fb62e78bc35461b50f50230a81a) | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
+| This revision | Prove general `d`-D multi-Gaussian border-rank bound `borderTotalCost d cs` for all radial exponential-polynomial representations (`Defs.lean`, `Main.lean`) | 5,750 | 5,432 | +172 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25
@@ -237,13 +259,16 @@ classification-only proof.
 
 `6aabb4d` extends `KernelRankLean` from two coordinates to arbitrary dimension `d ≥ 2` for
 complex exponential polynomials and real multi-Gaussians (3,822 physical lines, 3,537 nonblank).
-This revision replaces both the degree-0-only `MultiGaussian.lean` and `Sufficiency.lean` with
+`9722ff5` replaces both the degree-0-only `MultiGaussian.lean` and `Sufficiency.lean` with
 [MultiRealRank.lean](KernelRankLean/MultiRealRank.lean) (2,562 physical lines), proving the
 exact `d`-way real radial rank `multiTotalCost d cs` for arbitrary polynomial degrees and all
-`d ≥ 2` (`(d - 1) deg P + 1` per real rate and `2 (d - 1) deg P + d` per nonreal rate). This
-brings `KernelRankLean` to **5,324 physical lines and 5,021 nonblank lines** (+1,502 physical
-lines and +1,484 nonblank lines over `6aabb4d`), completing the unconditional `d`-dimensional
-real classification and exact-rank theorem.
+`d ≥ 2` (5,324 physical lines, 5,021 nonblank). `1094bf1` adds the exact-vs.-border rank
+separation on `‖x‖² cos(‖x‖²)` (5,578 physical lines, 5,267 nonblank), and this revision
+generalizes that construction to every list of well-formed components via `borderTotalCost d cs`
+(`multiTotalCost_eq_borderTotalCost_add`,
+`exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`), bringing `KernelRankLean`
+to **5,750 physical lines and 5,432 nonblank lines** (+172 physical lines and +165 nonblank
+lines over `1094bf1`).
 
 ## Alternative proofs of the semigroup step
 

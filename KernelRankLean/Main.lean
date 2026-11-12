@@ -21,13 +21,15 @@ For any dimension `d ≥ 2`:
   complex radial kernel on `ℝ^d` has `d`-way separable rank `N` if and only if `ψ` agrees on
   `[0, ∞)` with a sum of nonzero complex exponential polynomials at distinct rates with
   `∑ μ, ((d - 1) * deg P_μ + 1) = N`.
-* **Exact vs. border rank separation (`separableRank_radial_sq_mul_cos`,
-  `separableRank_radial_sq_mul_cos_complex`,
-  `exists_rank_le_two_mul_tendstoUniformlyOn_radial_sq_mul_cos`):** on `ℝ^d` (`d ≥ 2`), the
-  radial kernel `‖x‖² cos(‖x‖²)` has exact real rank `3 d - 2` and exact complexified rank `2 d`,
-  while an explicit family of kernels of real rank at most `2 d` converges to it uniformly on
-  every compact set—separating real border rank from exact real rank by at least `d - 2` for all
-  `d ≥ 3`.
+* **General `d`-D border-rank bound and exact-vs.-border separation
+  (`multiTotalCost_eq_borderTotalCost_add`,
+  `exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`,
+  `separableRank_radial_sq_mul_cos`, `separableRank_radial_sq_mul_cos_complex`,
+  `exists_rank_le_two_mul_tendstoUniformlyOn_radial_sq_mul_cos`):** every well-formed radial
+  profile `profile cs (‖x‖²)` on `ℝ^d` (`d ≥ 2`) is the uniform limit on every compact set of
+  multi-Gaussian kernels of real rank at most `borderTotalCost d cs = multiTotalCost d cs -
+  (d - 2) * ∑_c deg P_c`—strictly below its exact real rank whenever `d ≥ 3` and some `deg P_c ≥ 1`
+  (in particular `2 d` vs. `3 d - 2` on `‖x‖² cos(‖x‖²)`).
 -/
 
 open Complex Polynomial Filter Topology
@@ -156,58 +158,293 @@ theorem separableRank_radial_gaussian_eq_iff {d : ℕ} (hd : 2 ≤ d) (φ : ℝ 
   · rintro ⟨cs, hcs, hφcs, rfl⟩
     rw [radial_congr hφcs, separableRank_radial_gaussian_profile hd hcs]
 
-/-! ### Exact rank vs. border rank on `‖x‖² cos(‖x‖²)` -/
+/-! ### General `d`-D border-rank bound and exact-vs.-border rank separation -/
 
-private lemma abs_prod_one_add_sub_le {ι : Type*} (s : Finset ι) (a : ι → ℝ)
-    (ha : ∀ i ∈ s, 0 ≤ a i) (h : ℝ) (hh : |h| ≤ 1) :
-    |∏ j ∈ s, (1 + h * a j)| ≤ ∏ j ∈ s, (1 + a j) ∧
-    |(∏ j ∈ s, (1 + h * a j)) - 1| ≤ |h| * ∏ j ∈ s, (1 + a j) ∧
-    |(∏ j ∈ s, (1 + h * a j)) - 1 - h * ∑ j ∈ s, a j| ≤
-      h ^ 2 * ∏ j ∈ s, (1 + a j) := by
-  classical
-  induction s using Finset.induction with
-  | empty =>
-    simp [sq_nonneg]
-  | @insert i s hi ih =>
-    have hai : 0 ≤ a i := ha i (Finset.mem_insert_self i s)
-    have has : ∀ j ∈ s, 0 ≤ a j := fun j hj => ha j (Finset.mem_insert_of_mem hj)
-    obtain ⟨h1, h2, h3⟩ := ih has
-    set P := ∏ j ∈ s, (1 + h * a j)
-    set M := ∏ j ∈ s, (1 + a j)
-    set S := ∑ j ∈ s, a j
-    have hM : 0 ≤ M := Finset.prod_nonneg fun j hj => by linarith [has j hj]
-    rw [Finset.prod_insert hi, Finset.prod_insert hi, Finset.sum_insert hi]
-    refine ⟨?_, ?_, ?_⟩
-    · calc
-        |(1 + h * a i) * P| = |1 + h * a i| * |P| := abs_mul _ _
-        _ ≤ (1 + |h| * a i) * M := by
-          gcongr
+private lemma abs_exp_sub_one_sub_le (y : ℝ) :
+    |Real.exp y - 1 - y| ≤ y ^ 2 * Real.exp |y| := by
+  have hconv : Convex ℝ (Set.Icc (-|y|) |y|) := convex_Icc _ _
+  have hy_mem : y ∈ Set.Icc (-|y|) |y| := ⟨neg_abs_le y, le_abs_self y⟩
+  have h0_mem : (0 : ℝ) ∈ Set.Icc (-|y|) |y| := ⟨neg_nonpos.mpr (abs_nonneg y), abs_nonneg y⟩
+  have hexp_sub_one : ∀ t ∈ Set.Icc (-|y|) |y|, ‖Real.exp t - 1‖ ≤ |y| * Real.exp |y| := by
+    intro t ht
+    have h1 := hconv.norm_image_sub_le_of_norm_deriv_le (f := Real.exp)
+      (fun z _ => (Real.hasDerivAt_exp z).differentiableAt)
+      (fun z hz => by
+        rw [Real.deriv_exp, Real.norm_eq_abs, abs_of_pos (Real.exp_pos z)]
+        exact Real.exp_le_exp.mpr hz.2)
+      h0_mem ht
+    rw [Real.exp_zero, sub_zero, Real.norm_eq_abs, Real.norm_eq_abs] at h1
+    have ht_abs : |t| ≤ |y| := abs_le.mpr ht
+    calc
+      ‖Real.exp t - 1‖ = |Real.exp t - 1| := Real.norm_eq_abs _
+      _ ≤ Real.exp |y| * |t| := h1
+      _ ≤ Real.exp |y| * |y| := mul_le_mul_of_nonneg_left ht_abs (Real.exp_pos _).le
+      _ = |y| * Real.exp |y| := mul_comm _ _
+  have h2 := hconv.norm_image_sub_le_of_norm_deriv_le (f := fun t => Real.exp t - t)
+    (fun z _ => ((Real.hasDerivAt_exp z).sub (hasDerivAt_id z)).differentiableAt)
+    (fun z hz => by
+      have hd : deriv (fun t => Real.exp t - t) z = Real.exp z - 1 := by simp
+      rw [hd]
+      exact hexp_sub_one z hz)
+    h0_mem hy_mem
+  rw [Real.exp_zero, sub_zero, Real.norm_eq_abs, Real.norm_eq_abs, sub_zero] at h2
+  have heq1 : Real.exp y - y - 1 = Real.exp y - 1 - y := by ring
+  have heq2 : |y| * Real.exp |y| * |y| = y ^ 2 * Real.exp |y| := by
+    have : |y| * |y| = y ^ 2 := by rw [← sq_abs, sq]
+    linear_combination Real.exp |y| * this
+  rwa [heq1, heq2] at h2
+
+private lemma natDegree_C_add_C_mul_X_le {R : Type*} [Semiring R] (a b : R) :
+    (Polynomial.C a + Polynomial.C b * Polynomial.X).natDegree ≤ 1 := by
+  refine (Polynomial.natDegree_add_le _ _).trans (max_le (by simp) ?_)
+  simpa using (Polynomial.natDegree_C_mul_X_pow_le b 1)
+
+private lemma isSumOfProducts_component_expDiff {d : ℕ} (hd : 2 ≤ d) (c : Component)
+    (hc : c.WellFormed) (h : ℝ) :
+    IsSumOfProducts
+      (fun x : Fin d → ℝ =>
+        (c.poly.eval ((h⁻¹ * (Real.exp (h * ∑ j, x j ^ 2) - 1) : ℝ) : ℂ) *
+          exp (c.rate * (∑ j, x j ^ 2 : ℝ))).re)
+      (c.borderCost d) := by
+  have : Nonempty (Fin d) := ⟨⟨0, by omega⟩⟩
+  obtain ⟨i₀⟩ := ‹Nonempty (Fin d)›
+  let k := c.poly.natDegree
+  by_cases him : c.rate.im = 0
+  · have hcost : c.borderCost d = k + 1 := by simp [Component.borderCost, him, k]
+    rw [hcost]
+    have hcoeff_im : ∀ q, (c.poly.coeff q).im = 0 := hc.2.2 him
+    let P_R : ℝ[X] :=
+      ∑ q ∈ Finset.range (k + 1), Polynomial.C (c.poly.coeff q).re * Polynomial.X ^ q
+    have hPR_deg : P_R.natDegree ≤ k := by
+      refine Polynomial.natDegree_sum_le_of_forall_le _ _ fun q hq => ?_
+      exact (Polynomial.natDegree_C_mul_X_pow_le _ _).trans
+        (Nat.lt_succ_iff.mp (Finset.mem_range.mp hq))
+    let L_R : ℝ[X] := Polynomial.C (-h⁻¹) + Polynomial.C h⁻¹ * Polynomial.X
+    have hLR_deg : L_R.natDegree ≤ 1 := natDegree_C_add_C_mul_X_le _ _
+    let Q_R : ℝ[X] := P_R.comp L_R
+    have hQR_deg : Q_R.natDegree < k + 1 := by
+      refine Nat.lt_succ_of_le (Polynomial.natDegree_comp_le.trans ?_)
+      exact (Nat.mul_le_mul hPR_deg hLR_deg).trans (by simp)
+    have hrate_eq : c.rate = (c.rate.re : ℂ) := by
+      apply Complex.ext <;> simp [him]
+    have hpoly_eq (u : ℝ) : c.poly.eval (u : ℂ) = ((P_R.eval u : ℝ) : ℂ) := by
+      rw [Polynomial.eval_eq_sum_range' (Nat.lt_succ_self k)]
+      change _ = (((Polynomial.evalRingHom u) P_R : ℝ) : ℂ)
+      simp only [P_R, map_sum, Polynomial.coe_evalRingHom, Polynomial.eval_mul, Polynomial.eval_C,
+        Polynomial.eval_pow, Polynomial.eval_X, Complex.ofReal_sum, Complex.ofReal_mul,
+        Complex.ofReal_pow]
+      refine Finset.sum_congr rfl fun q _ => ?_
+      congr 1
+      apply Complex.ext <;> simp [hcoeff_im q]
+    refine ⟨fun m j u =>
+      (if j = i₀ then Q_R.coeff m else 1) *
+        Real.exp ((c.rate.re + (m : ℕ) * h) * u ^ 2), fun x => ?_⟩
+    dsimp only
+    set s := ∑ j : Fin d, x j ^ 2
+    let u_s : ℝ := h⁻¹ * (Real.exp (h * s) - 1)
+    have hexp_re : exp (c.rate * (s : ℂ)) = (Real.exp (c.rate.re * s) : ℂ) := by
+      conv_lhs => rw [hrate_eq]
+      rw [← Complex.ofReal_mul, Complex.ofReal_exp]
+    change (c.poly.eval (u_s : ℂ) * exp (c.rate * (s : ℂ))).re = _
+    rw [hpoly_eq u_s, hexp_re, ← Complex.ofReal_mul, Complex.ofReal_re]
+    have hLR_eval : L_R.eval (Real.exp (h * s)) = u_s := by
+      simp [L_R, u_s]
+      ring
+    have hQR_eval : P_R.eval u_s = ∑ m : Fin (k + 1), Q_R.coeff m * Real.exp (h * s) ^ (m : ℕ) := by
+      rw [← hLR_eval, ← Polynomial.eval_comp,
+        Polynomial.eval_eq_sum_range' hQR_deg,
+        Fin.sum_univ_eq_sum_range (fun m => Q_R.coeff m * Real.exp (h * s) ^ m) (k + 1)]
+    rw [hQR_eval, Finset.sum_mul]
+    refine Finset.sum_congr rfl fun m _ => ?_
+    have hprod : (∏ j : Fin d,
+        (if j = i₀ then Q_R.coeff m else 1) *
+          Real.exp ((c.rate.re + (m : ℕ) * h) * x j ^ 2)) =
+        Q_R.coeff m * ∏ j : Fin d, Real.exp ((c.rate.re + (m : ℕ) * h) * x j ^ 2) := by
+      rw [Finset.prod_mul_distrib]
+      congr 1
+      rw [← Finset.mul_prod_erase Finset.univ _ (Finset.mem_univ i₀)]
+      have her : ∏ j ∈ Finset.univ.erase i₀, (if j = i₀ then Q_R.coeff m else (1 : ℝ)) = 1 :=
+        Finset.prod_eq_one fun j hj => by simp [Finset.ne_of_mem_erase hj]
+      simp [her]
+    rw [hprod, ← Real.exp_sum, ← Finset.mul_sum, ← Real.exp_nat_mul, mul_assoc, ← Real.exp_add]
+    have : (m : ℕ) * (h * s) + c.rate.re * s = (c.rate.re + (m : ℕ) * h) * s := by ring
+    rw [this]
+  · have hcost : c.borderCost d = (k + 1) * d := by
+      simp [Component.borderCost, him, k, mul_comm]
+    rw [hcost]
+    let L_C : ℂ[X] := Polynomial.C (-(h : ℂ)⁻¹) + Polynomial.C ((h : ℂ)⁻¹) * Polynomial.X
+    have hLC_deg : L_C.natDegree ≤ 1 := natDegree_C_add_C_mul_X_le _ _
+    let Q_C : ℂ[X] := c.poly.comp L_C
+    have hQC_deg : Q_C.natDegree < k + 1 := by
+      refine Nat.lt_succ_of_le (Polynomial.natDegree_comp_le.trans ?_)
+      exact (Nat.mul_le_mul le_rfl hLC_deg).trans (by simp [k])
+    have hcpx : IsSumOfProducts
+        (fun x : Fin d → ℝ =>
+          c.poly.eval ((h⁻¹ * (Real.exp (h * ∑ j, x j ^ 2) - 1) : ℝ) : ℂ) *
+            exp (c.rate * (∑ j, x j ^ 2 : ℝ)))
+        (k + 1) := by
+      refine ⟨fun m j u =>
+        (if j = i₀ then Q_C.coeff m else 1) *
+          exp ((c.rate + (m : ℕ) * (h : ℂ)) * (u ^ 2 : ℝ)), fun x => ?_⟩
+      dsimp only
+      set s := ∑ j : Fin d, x j ^ 2
+      let u_s : ℝ := h⁻¹ * (Real.exp (h * s) - 1)
+      have hLC_eval : L_C.eval (exp ((h : ℂ) * (s : ℂ))) = (u_s : ℂ) := by
+        simp only [L_C, u_s, Polynomial.eval_add, Polynomial.eval_C, Polynomial.eval_mul,
+          Polynomial.eval_X, ← Complex.ofReal_mul]
+        rw [← Complex.ofReal_exp]
+        push_cast
+        ring
+      change c.poly.eval (u_s : ℂ) * exp (c.rate * (s : ℂ)) = _
+      rw [← hLC_eval, ← Polynomial.eval_comp, Polynomial.eval_eq_sum_range' hQC_deg,
+        ← Fin.sum_univ_eq_sum_range (fun m => Q_C.coeff m * exp ((h : ℂ) * (s : ℂ)) ^ m) (k + 1),
+        Finset.sum_mul]
+      refine Finset.sum_congr rfl fun m _ => ?_
+      have hprod : (∏ j : Fin d,
+          (if j = i₀ then Q_C.coeff m else 1) *
+            exp ((c.rate + (m : ℕ) * (h : ℂ)) * (x j ^ 2 : ℝ))) =
+          Q_C.coeff m * ∏ j : Fin d, exp ((c.rate + (m : ℕ) * (h : ℂ)) * (x j ^ 2 : ℝ)) := by
+        rw [Finset.prod_mul_distrib]
+        congr 1
+        rw [← Finset.mul_prod_erase Finset.univ _ (Finset.mem_univ i₀)]
+        have her : ∏ j ∈ Finset.univ.erase i₀, (if j = i₀ then Q_C.coeff m else (1 : ℂ)) = 1 :=
+          Finset.prod_eq_one fun j hj => by simp [Finset.ne_of_mem_erase hj]
+        simp [her]
+      rw [hprod, ← Complex.exp_sum, ← Complex.exp_nat_mul, mul_assoc, ← Complex.exp_add]
+      have hs_cast : (∑ j : Fin d, (c.rate + (m : ℕ) * (h : ℂ)) * (x j ^ 2 : ℝ)) =
+          (c.rate + (m : ℕ) * (h : ℂ)) * (s : ℂ) := by
+        rw [← Finset.mul_sum]
+        push_cast [s]
+        rfl
+      rw [hs_cast]
+      have : (m : ℕ) * ((h : ℂ) * (s : ℂ)) + c.rate * (s : ℂ) =
+          (c.rate + (m : ℕ) * (h : ℂ)) * (s : ℂ) := by ring
+      rw [this]
+    exact hcpx.re (by omega)
+
+private lemma exists_isSumOfProducts_borderTotalCost_tendstoUniformlyOn
+    {d : ℕ} (hd : 2 ≤ d) (cs : List Component) (hcs : ∀ c ∈ cs, c.WellFormed) :
+    ∃ F : ℝ → (Fin d → ℝ) → ℝ,
+      (∀ h, IsSumOfProducts (F h) (borderTotalCost d cs)) ∧
+      ∀ C : Set (Fin d → ℝ), IsCompact C →
+        TendstoUniformlyOn F (fun x => profile cs (∑ j, x j ^ 2)) (𝓝[≠] (0 : ℝ)) C := by
+  induction cs with
+  | nil =>
+    refine ⟨fun _ _ => 0, fun _ => ?_, fun C _ => ?_⟩
+    · dsimp only [borderTotalCost, List.map_nil, List.sum_nil]
+      exact ⟨fun n => n.elim0, fun _ => by simp⟩
+    · rw [Metric.tendstoUniformlyOn_iff]
+      intro ε hε
+      exact Filter.Eventually.of_forall fun _ _ _ => by simpa [profile] using hε
+  | cons c cs ih =>
+    have hc : c.WellFormed := hcs c List.mem_cons_self
+    have hcs' : ∀ c' ∈ cs, c'.WellFormed := fun c' hc' => hcs c' (List.mem_cons_of_mem c hc')
+    obtain ⟨F', hrank', htend'⟩ := ih hcs'
+    let Fc (h : ℝ) (x : Fin d → ℝ) : ℝ :=
+      (c.poly.eval ((h⁻¹ * (Real.exp (h * ∑ j, x j ^ 2) - 1) : ℝ) : ℂ) *
+        exp (c.rate * (∑ j, x j ^ 2 : ℝ))).re
+    refine ⟨fun h x => Fc h x + F' h x, fun h => ?_, fun C hC => ?_⟩
+    · exact (isSumOfProducts_component_expDiff hd c hc h).add (hrank' h)
+    · have hFc_tend : TendstoUniformlyOn Fc (fun x => c.eval (∑ j, x j ^ 2)) (𝓝[≠] (0 : ℝ)) C := by
+        rw [Metric.tendstoUniformlyOn_iff]
+        intro ε hε
+        have hcontS : Continuous (fun x : Fin d → ℝ => ∑ j : Fin d, x j ^ 2) := by fun_prop
+        obtain ⟨B, hB⟩ : ∃ B : ℝ, 0 ≤ B ∧ ∀ x ∈ C, ∑ j : Fin d, x j ^ 2 ≤ B := by
+          rcases C.eq_empty_or_nonempty with rfl | hne
+          · exact ⟨0, le_rfl, by simp⟩
+          · obtain ⟨x₀, hx₀, hmax⟩ := hC.exists_isMaxOn hne hcontS.continuousOn
+            exact ⟨∑ j : Fin d, x₀ j ^ 2,
+              Finset.sum_nonneg fun j _ => sq_nonneg (x₀ j), fun x hx => hmax hx⟩
+        let g (p : ℝ × ℝ) : ℝ := (c.poly.eval (p.1 : ℂ) * exp (c.rate * (p.2 : ℂ))).re
+        have hg_cont : Continuous g := by
+          refine Complex.continuous_re.comp (Continuous.mul ?_ ?_)
+          · exact c.poly.continuous_aeval.comp (Complex.continuous_ofReal.comp continuous_fst)
+          · exact Complex.continuous_exp.comp
+              (continuous_const.mul (Complex.continuous_ofReal.comp continuous_snd))
+        let K_box : Set (ℝ × ℝ) := Set.Icc (-1) (B + 1) ×ˢ Set.Icc 0 B
+        have hK_comp : IsCompact K_box := isCompact_Icc.prod isCompact_Icc
+        obtain ⟨δ_u, hδ_u_pos, hδ_u⟩ := Metric.uniformContinuousOn_iff.mp
+          (hK_comp.uniformContinuousOn_of_continuous hg_cont.continuousOn) ε hε
+        let M_B : ℝ := max 1 ((B + 1) ^ 2 * Real.exp (B + 1))
+        have hM_B_pos : 0 < M_B := lt_of_lt_of_le zero_lt_one (le_max_left _ _)
+        let η : ℝ := min 1 (min δ_u 1 / (2 * M_B))
+        have hη_pos : 0 < η :=
+          lt_min zero_lt_one (div_pos (lt_min hδ_u_pos zero_lt_one) (mul_pos zero_lt_two hM_B_pos))
+        have hev : ∀ᶠ h in 𝓝[≠] (0 : ℝ), h ≠ 0 ∧ |h| < η := by
+          filter_upwards [self_mem_nhdsWithin,
+            nhdsWithin_le_nhds (Metric.ball_mem_nhds (0 : ℝ) hη_pos)] with h hh0 hball
+          exact ⟨hh0, by simpa [Real.dist_eq] using hball⟩
+        filter_upwards [hev] with h ⟨hh0, hhη⟩ x hxC
+        set s := ∑ j : Fin d, x j ^ 2
+        have hs0 : 0 ≤ s := Finset.sum_nonneg fun j _ => sq_nonneg (x j)
+        have hsB : s ≤ B := hB.2 x hxC
+        have hh1 : |h| ≤ 1 := le_of_lt (lt_of_lt_of_le hhη (min_le_left _ _))
+        let u_s : ℝ := h⁻¹ * (Real.exp (h * s) - 1)
+        have hu_diff : |u_s - s| < min δ_u 1 := by
+          have hh_pos : 0 < |h| := abs_pos.mpr hh0
+          have hsub : u_s - s = h⁻¹ * (Real.exp (h * s) - 1 - h * s) := by
+            dsimp only [u_s]
+            field_simp [hh0]
+          have habs_hs : |h * s| ≤ B + 1 := by
+            rw [abs_mul, abs_of_nonneg hs0]
+            nlinarith
+          have hexp_b := abs_exp_sub_one_sub_le (h * s)
+          have hrem : |u_s - s| ≤ |h| * M_B := by
+            rw [hsub, abs_mul, abs_inv]
+            calc
+              |h|⁻¹ * |Real.exp (h * s) - 1 - h * s|
+                  ≤ |h|⁻¹ * ((h * s) ^ 2 * Real.exp |h * s|) := by gcongr
+              _ = |h| * (s ^ 2 * Real.exp |h * s|) := by
+                  have : (h * s) ^ 2 = |h| * |h| * s ^ 2 := by
+                    rw [mul_pow, ← sq_abs h, sq]
+                  rw [this]
+                  field_simp [hh_pos.ne']
+              _ ≤ |h| * ((B + 1) ^ 2 * Real.exp (B + 1)) := by
+                  refine mul_le_mul_of_nonneg_left ?_ (abs_nonneg h)
+                  exact mul_le_mul (pow_le_pow_left₀ hs0 (by linarith) 2)
+                    (Real.exp_le_exp.mpr habs_hs) (Real.exp_pos _).le (sq_nonneg _)
+              _ ≤ |h| * M_B := mul_le_mul_of_nonneg_left (le_max_right _ _) (abs_nonneg h)
           calc
-            |1 + h * a i| ≤ |1| + |h * a i| := abs_add_le _ _
-            _ = 1 + |h| * a i := by rw [abs_one, abs_mul, abs_of_nonneg hai]
-        _ ≤ (1 + a i) * M := by
-          gcongr
-          nlinarith
-    · have hid : (1 + h * a i) * P - 1 = (P - 1) + h * a i * P := by ring
-      rw [hid]
-      calc
-        |(P - 1) + h * a i * P| ≤ |P - 1| + |h * a i * P| := abs_add_le _ _
-        _ = |P - 1| + |h| * a i * |P| := by
-          rw [abs_mul, abs_mul, abs_of_nonneg hai]
-        _ ≤ |h| * M + |h| * a i * M := by gcongr
-        _ = |h| * ((1 + a i) * M) := by ring
-    · have hid : (1 + h * a i) * P - 1 - h * (a i + S) =
-          (P - 1 - h * S) + h * a i * (P - 1) := by ring
-      rw [hid]
-      calc
-        |(P - 1 - h * S) + h * a i * (P - 1)|
-            ≤ |P - 1 - h * S| + |h * a i * (P - 1)| := abs_add_le _ _
-        _ = |P - 1 - h * S| + |h| * a i * |P - 1| := by
-          rw [abs_mul, abs_mul, abs_of_nonneg hai]
-        _ ≤ h ^ 2 * M + |h| * a i * (|h| * M) := by gcongr
-        _ = h ^ 2 * ((1 + a i) * M) := by
-          have hsq : |h| * |h| = h ^ 2 := by rw [← sq_abs, sq]
-          linear_combination a i * M * hsq
+            |u_s - s| ≤ |h| * M_B := hrem
+            _ < η * M_B := mul_lt_mul_of_pos_right hhη hM_B_pos
+            _ ≤ (min δ_u 1 / (2 * M_B)) * M_B :=
+                mul_le_mul_of_nonneg_right (min_le_right _ _) hM_B_pos.le
+            _ = min δ_u 1 / 2 := by field_simp [hM_B_pos.ne']
+            _ < min δ_u 1 := half_lt_self (lt_min hδ_u_pos zero_lt_one)
+        have hu_box : (u_s, s) ∈ K_box := by
+          have hu1 : |u_s - s| ≤ 1 := le_of_lt (lt_of_lt_of_le hu_diff (min_le_right _ _))
+          rw [abs_le] at hu1
+          exact ⟨⟨by linarith, by linarith⟩, ⟨hs0, hsB⟩⟩
+        have hs_box : (s, s) ∈ K_box := ⟨⟨by linarith, by linarith⟩, ⟨hs0, hsB⟩⟩
+        have hdist : dist (s, s) (u_s, s) < δ_u := by
+          rw [Prod.dist_eq]
+          simp only [dist_self, max_eq_left dist_nonneg]
+          rw [Real.dist_eq, abs_sub_comm]
+          exact lt_of_lt_of_le hu_diff (min_le_left _ _)
+        change dist (g (s, s)) (g (u_s, s)) < ε
+        exact hδ_u (s, s) hs_box (u_s, s) hu_box hdist
+      have hprof_cons : (fun x : Fin d → ℝ => profile (c :: cs) (∑ j, x j ^ 2)) =
+          fun x => c.eval (∑ j, x j ^ 2) + profile cs (∑ j, x j ^ 2) := by
+        funext x
+        simp [profile]
+      rw [hprof_cons]
+      exact hFc_tend.add (htend' C hC)
+
+/-- **General `d`-D border-rank bound (`d ≥ 2`).** For every list `cs` of well-formed components,
+there exists an explicit family `F h` of real kernels on `ℝ^d` having `d`-way separable rank at
+most `borderTotalCost d cs` for every `h ∈ ℝ` and converging uniformly on every compact subset
+`C ⊆ ℝ^d` to `x ↦ profile cs (∑ j, x j ^ 2)` as `h → 0` (`h ≠ 0`). Combined with
+`separableRank_radial_profile` and `multiTotalCost_eq_borderTotalCost_add`, every representation
+in dimension `d ≥ 3` has an exact-minus-border real rank gap of at least
+`(d - 2) * ∑_{c ∈ cs} deg P_c`. -/
+theorem exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile
+    {d : ℕ} (hd : 2 ≤ d) (cs : List Component) (hcs : ∀ c ∈ cs, c.WellFormed) :
+    ∃ F : ℝ → (Fin d → ℝ) → ℝ,
+      (∀ h, separableRank (F h) ≤ (borderTotalCost d cs : ℕ)) ∧
+      ∀ C : Set (Fin d → ℝ), IsCompact C →
+        TendstoUniformlyOn F (fun x => profile cs (∑ j, x j ^ 2)) (𝓝[≠] (0 : ℝ)) C := by
+  obtain ⟨F, hF, htend⟩ := exists_isSumOfProducts_borderTotalCost_tendstoUniformlyOn hd cs hcs
+  exact ⟨F, fun h => iInf₂_le _ (hF h), htend⟩
 
 private lemma re_ofReal_mul_exp_I_mul (r s : ℝ) :
     (((r : ℂ) * exp (I * (s : ℂ))).re) = r * Real.cos s := by
@@ -267,111 +504,35 @@ theorem separableRank_radial_sq_mul_cos_complex {d : ℕ} (hd : 2 ≤ d) :
   · simp [S, Finset.sum_pair hneI, hdeg]
     omega
 
-/-- **Border-rank separation (`d ≥ 3`).** On `ℝ^d` (`d ≥ 2`), there exists an explicit family `F h`
-of real kernels with `separableRank (F h) ≤ 2 d` for every `h ∈ ℝ` that converges uniformly on
-every compact subset `C ⊆ ℝ^d` to `‖x‖² cos(‖x‖²)` as `h → 0` (`h ≠ 0`). Combined with
-`separableRank_radial_sq_mul_cos`, this proves that for every `d ≥ 3`, the set of kernels of real
-separable rank at most `2 d` is not closed under compact-open limits, with an exact-minus-border
-rank gap of at least `d - 2`. -/
+/-- **Border-rank separation on `‖x‖² cos(‖x‖²)` (`d ≥ 3`).** Specialization of
+`exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile` to `[⟨I, X⟩]`: on `ℝ^d`
+(`d ≥ 2`), there exists an explicit family `F h` of real kernels with `separableRank (F h) ≤ 2 d`
+converging uniformly on every compact subset `C ⊆ ℝ^d` to `‖x‖² cos(‖x‖²)`. -/
 theorem exists_rank_le_two_mul_tendstoUniformlyOn_radial_sq_mul_cos {d : ℕ} (hd : 2 ≤ d) :
     ∃ F : ℝ → (Fin d → ℝ) → ℝ,
       (∀ h, separableRank (F h) ≤ (2 * d : ℕ)) ∧
       ∀ C : Set (Fin d → ℝ), IsCompact C →
         TendstoUniformlyOn F (fun x => (∑ j, x j ^ 2) * Real.cos (∑ j, x j ^ 2))
           (𝓝[≠] (0 : ℝ)) C := by
-  have : Nonempty (Fin d) := ⟨⟨0, by omega⟩⟩
-  let G₁ (h : ℝ) (x : Fin d → ℝ) : ℂ :=
-    ∏ j : Fin d, (1 + (h : ℂ) * (x j ^ 2 : ℝ)) * exp (I * (x j ^ 2 : ℝ))
-  let G₀ (x : Fin d → ℝ) : ℂ :=
-    ∏ j : Fin d, exp (I * (x j ^ 2 : ℝ))
-  let F (h : ℝ) (x : Fin d → ℝ) : ℝ :=
-    h⁻¹ * (G₁ h x).re + (-h⁻¹) * (G₀ x).re
-  refine ⟨F, ?_, ?_⟩
-  · intro h
-    have hG₁ : IsSumOfProducts (fun x => (G₁ h x).re) d := by
-      have hc : IsSumOfProducts (G₁ h) 1 :=
-        ⟨fun _ j u => (1 + (h : ℂ) * (u ^ 2 : ℝ)) * exp (I * (u ^ 2 : ℝ)), fun x => by simp [G₁]⟩
-      simpa using hc.re (by omega)
-    have hG₀ : IsSumOfProducts (fun x => (G₀ x).re) d := by
-      have hc : IsSumOfProducts G₀ 1 :=
-        ⟨fun _ j u => exp (I * (u ^ 2 : ℝ)), fun x => by simp [G₀]⟩
-      simpa using hc.re (by omega)
-    have hF : IsSumOfProducts (F h) (d + d) :=
-      (hG₁.smul h⁻¹).add (hG₀.smul (-h⁻¹))
-    rw [show 2 * d = d + d by omega]
-    exact iInf₂_le (d + d) hF
-  · intro C hC
-    rw [Metric.tendstoUniformlyOn_iff]
-    intro ε hε
-    have hcontM : Continuous (fun x : Fin d → ℝ => ∏ j : Fin d, (1 + x j ^ 2)) := by fun_prop
-    obtain ⟨B, hB⟩ : ∃ B : ℝ, ∀ x ∈ C, ∏ j : Fin d, (1 + x j ^ 2) ≤ B := by
-      rcases C.eq_empty_or_nonempty with rfl | hne
-      · exact ⟨1, by simp⟩
-      · obtain ⟨x₀, hx₀, hmax⟩ := hC.exists_isMaxOn hne hcontM.continuousOn
-        exact ⟨∏ j : Fin d, (1 + x₀ j ^ 2), fun x hx => hmax hx⟩
-    let B' : ℝ := max B 1
-    have hB'_pos : 0 < B' := lt_of_lt_of_le zero_lt_one (le_max_right B 1)
-    let δ : ℝ := min 1 (ε / (2 * B'))
-    have hδ_pos : 0 < δ := lt_min zero_lt_one (div_pos hε (mul_pos zero_lt_two hB'_pos))
-    have hev : ∀ᶠ h in 𝓝[≠] (0 : ℝ), h ≠ 0 ∧ |h| < δ := by
-      filter_upwards [self_mem_nhdsWithin,
-        nhdsWithin_le_nhds (Metric.ball_mem_nhds (0 : ℝ) hδ_pos)] with h hh0 hball
-      exact ⟨hh0, by simpa [Real.dist_eq] using hball⟩
-    filter_upwards [hev] with h ⟨hh0, hhδ⟩ x hxC
-    have hh1 : |h| ≤ 1 := le_of_lt (lt_of_lt_of_le hhδ (min_le_left _ _))
-    have hprod_G₁ : G₁ h x =
-        ((∏ j : Fin d, (1 + h * x j ^ 2) : ℝ) : ℂ) * exp (I * (∑ j : Fin d, x j ^ 2 : ℝ)) := by
-      simp only [G₁, Finset.prod_mul_distrib, ← Complex.exp_sum]
-      congr 1
-      · push_cast
-        rfl
-      · congr 1
-        push_cast
-        rw [Finset.mul_sum]
-    have hprod_G₀ : G₀ x = exp (I * (∑ j : Fin d, x j ^ 2 : ℝ)) := by
-      simp only [G₀, ← Complex.exp_sum]
-      congr 1
-      push_cast
-      rw [Finset.mul_sum]
-    have hFx : F h x =
-        h⁻¹ * ((∏ j : Fin d, (1 + h * x j ^ 2)) - 1) * Real.cos (∑ j : Fin d, x j ^ 2) := by
-      rw [show F h x = h⁻¹ * (G₁ h x).re + (-h⁻¹) * (G₀ x).re from rfl, hprod_G₁, hprod_G₀]
-      have h1 := re_ofReal_mul_exp_I_mul 1 (∑ j : Fin d, x j ^ 2)
-      simp only [Complex.ofReal_one, one_mul] at h1
-      rw [re_ofReal_mul_exp_I_mul, h1]
-      ring
-    rw [Real.dist_eq, hFx]
-    set S := ∑ j : Fin d, x j ^ 2
-    set P := ∏ j : Fin d, (1 + h * x j ^ 2)
-    have hdiff : S * Real.cos S - h⁻¹ * (P - 1) * Real.cos S =
-        -(h⁻¹ * (P - 1 - h * S) * Real.cos S) := by
-      field_simp [hh0]
-      ring
-    rw [hdiff, abs_neg, abs_mul, abs_mul, abs_inv]
-    have hbound := (abs_prod_one_add_sub_le Finset.univ (fun j => x j ^ 2)
-      (fun j _ => sq_nonneg (x j)) h hh1).2.2
-    have hM_le : ∏ j : Fin d, (1 + x j ^ 2) ≤ B' :=
-      le_trans (hB x hxC) (le_max_left B 1)
-    have hcos_le : |Real.cos S| ≤ 1 := Real.abs_cos_le_one S
-    have hrem : |h|⁻¹ * |P - 1 - h * S| ≤ |h| * B' := by
-      have hh_pos : 0 < |h| := abs_pos.mpr hh0
-      calc
-        |h|⁻¹ * |P - 1 - h * S| ≤ |h|⁻¹ * (h ^ 2 * ∏ j : Fin d, (1 + x j ^ 2)) := by gcongr
-        _ ≤ |h|⁻¹ * (h ^ 2 * B') := by gcongr
-        _ = |h| * B' := by
-          have hsq : h ^ 2 = |h| * |h| := by rw [← sq_abs, sq]
-          rw [hsq]
-          field_simp [hh_pos.ne']
-    calc
-      |h|⁻¹ * |P - 1 - h * S| * |Real.cos S|
-          ≤ (|h| * B') * 1 := mul_le_mul hrem hcos_le (abs_nonneg _) (by positivity)
-      _ = |h| * B' := mul_one _
-      _ < δ * B' := by gcongr
-      _ ≤ (ε / (2 * B')) * B' := by
-        gcongr
-        exact min_le_right _ _
-      _ = ε / 2 := by
-        field_simp [hB'_pos.ne']
-      _ < ε := half_lt_self hε
+  let c : Component := ⟨I, Polynomial.X⟩
+  have hwf : ∀ c' ∈ ([c] : List Component), c'.WellFormed := by
+    simp only [List.mem_singleton, forall_eq]
+    exact ⟨Polynomial.X_ne_zero, by simp [c], fun h => by simp [c] at h⟩
+  obtain ⟨F, hrank, htend⟩ :=
+    exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile hd [c] hwf
+  have hcost : borderTotalCost d [c] = 2 * d := by
+    have : c.rate.im ≠ 0 := by simp [c]
+    simp only [borderTotalCost, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, add_zero,
+      Component.borderCost, this, ↓reduceIte, c, Polynomial.natDegree_X]
+    ring
+  have hfun : (fun x : Fin d → ℝ => profile [c] (∑ j, x j ^ 2)) =
+      fun x => (∑ j, x j ^ 2) * Real.cos (∑ j, x j ^ 2) := by
+    funext x
+    simp only [profile, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, add_zero,
+      Component.eval, c, Polynomial.eval_X]
+    exact re_ofReal_mul_exp_I_mul _ _
+  rw [hcost] at hrank
+  rw [hfun] at htend
+  exact ⟨F, hrank, htend⟩
 
 end KernelRank
