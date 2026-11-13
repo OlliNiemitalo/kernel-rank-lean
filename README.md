@@ -116,15 +116,19 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   `separableRank_radial_eq_iff` shows that `N = r + 2 c` horizontal–vertical pass pairs
   (`2 r + 4 c` 1-D passes) is the exact minimum over `ℝ` for that representation. While `N` is
   invariant, splitting high-order approximations component-by-component causes up to `595×`–`1,110×`
-  peak channel cancellation at `N = 12`, producing `4.4`–`6.8 / 255` HDR bokeh errors in IEEE
-  `float16` intermediates; orthonormalizing `rowSpan(K)` via QR + symmetric eigendecomposition
+  peak channel cancellation at `N = 12`, producing `7.9`–`15.2 / 255` 20-scene mean max 8-bit sRGB HDR
+  bokeh errors in IEEE `float16` intermediates even after diagonal `‖h_n‖₂ = ‖v_n‖₂` pair balancing
+  (and `float16` overflow when unscaled degree-5 weights sit on the first pass); orthonormalizing
+  `rowSpan(K)` via QR + symmetric eigendecomposition and summing in ascending `|e_n|` order
   ([`Applications/blur_2d.py`](Applications/blur_2d.py)) achieves the global nuclear-norm minimum
-  for `∑_n ‖h_n‖₂ ‖v_n‖₂` and reduces `float16` 8-bit sRGB HDR bokeh max error from `9.4`–`14.8 / 255`
-  at `N = 12` to `≤ 0.33 / 255` across all 18 families (`11.7×`–`35.6×`
-  faster than direct `155 × 155` 2-D convolution at `1920 × 1080` RGBA on an RTX 4070 Ti Super, and
-  faster than `1.22–1.34 ms` clamp-padded `cuFFT` at `R = 4` for `R_px ≤ 16` and `R = 8` for
-  `R_px = 8`, whereas `cuFFT` at `1.10–1.87 ms` is faster for purely shift-invariant larger-radius
-  or higher-rank FIR blurs), in contrast to `d ≥ 3` where minimal CP decompositions lack transitive
+  for `∑_n ‖h_n‖₂ ‖v_n‖₂`, reduces 20-scene `float16` 8-bit sRGB HDR bokeh max error to
+  `≤ 0.31 / 255` (`≤ 0.33 / 255` across all 18 families) while cutting linear-light highlight error
+  by a further `1.5×`–`2.9×` over largest-first summation (with all three implementations tuned and
+  checked against `float64` references in [`Applications/gpu_kernels.py`](Applications/gpu_kernels.py),
+  the `float16` cascade is `9.4×`–`29.6×` faster than direct `155 × 155` 2-D convolution at
+  `1920 × 1080` RGBA on an RTX 4070 Ti Super, and faster than `0.45–0.46 ms` clamp-padded `cuFFT`
+  only at `R = 4` for `R_px ≤ 16`, whereas `cuFFT` at `0.45–0.56 ms` is faster for purely
+  shift-invariant larger-radius or higher-rank FIR blurs), in contrast to `d ≥ 3` where minimal CP decompositions lack transitive
   `GL_R(ℝ)` cross-component rotation freedom.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
   circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
@@ -160,12 +164,15 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   stability on a 232,620-point Brillouin-octant/shell grid in
   [`Applications/acoustics_3d.py`](Applications/acoustics_3d.py) (`R = 7`, `W = 13`, `ν = 1.00`)
   reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.049%` (extending the
-  `0.1%`-accurate bandwidth from `0.085π` to `0.81π`—an analytical resolution-scaling reduction of
-  `865×` in grid voxels and `476×`–`660×` in compute time vs. `27`-pt `IWB` at equal `0.1%`
-  dispersion accuracy, while `1`-pass `IWB` at `0.323 ms/step` is faster when coarse dispersion is
-  acceptable and periodic `cuFFT` `k`-space propagation at `2.73 ms/step` is faster and
-  dispersion-free on homogeneous obstacle-free boxes), while half-sample even reflection enforces
-  exact rigid-wall Neumann boundary conditions.
+  `0.1%`-accurate bandwidth from `0.085π` for `27`-pt `IWB` and `0.236π` for fourth-order `25`-pt
+  `O(Δx⁴, Δt⁴)` to `0.81π`—an analytical resolution-scaling reduction of `865×` in grid voxels and
+  `476×`–`660×` in compute time vs. `27`-pt `IWB`, or `40×` in voxels and `14×`–`19×` in compute
+  time vs. `25`-pt `O(Δx⁴, Δt⁴)` at equal `0.1%` dispersion accuracy, while `1`-pass compact FDTD
+  at `0.324 ms/step` is faster when coarse dispersion is acceptable and periodic `cuFFT` `k`-space
+  propagation at `1.44 ms/step` is dispersion-free on homogeneous obstacle-free boxes, against
+  `1.51 ms/step` for the `R = 7` separable step in `float32` and `1.09 ms/step` with `float16`
+  intermediates),
+  while half-sample even reflection enforces exact rigid-wall Neumann boundary conditions.
 * **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
   Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
   sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center

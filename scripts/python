@@ -7,6 +7,7 @@ export MPLCONFIGDIR="$tmp/cache/matplotlib"
 export UV_CACHE_DIR="$tmp/cache/uv"
 export PYTHONPYCACHEPREFIX="$tmp/cache/pycache"
 export TRITON_DEFAULT_FP_FUSION=1
+export TRITON_CACHE_DIR="$tmp/cache/triton"
 mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR" "$PYTHONPYCACHEPREFIX"
 
 if [ ! -x "$tmp/venv/bin/python" ]; then

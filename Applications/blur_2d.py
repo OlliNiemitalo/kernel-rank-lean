@@ -8,8 +8,12 @@
   2. Demonstrates GL_N(R) conditioning on rowSpan: per-component real channels vs. nuclear-norm-optimal
      QR + symmetric eigendecomposition channels, measuring dynamic-range amplification and actual
      IEEE float16 vs. float32/float64 bokeh accuracy on an HDR specular test scene on RTX 4070 Ti Super.
-  3. Benchmarks RTX 4070 Ti Super 2-D convolution throughput (direct W x W vs. separable fp32 & fp16).
+  3. Benchmarks RTX 4070 Ti Super 2-D convolution throughput (direct W x W, cuFFT, and separable fp32 & fp16;
+     implementations in gpu_kernels.py), checking every method against a float64 reference.
+
+Run with --gpu-only to rerun just the GPU throughput benchmark from the stored families.
 """
+import argparse
 import json
 import math
 import os
@@ -17,9 +21,9 @@ import time
 import numpy as np
 import torch
 import torch.nn.functional as F
-import triton
-import triton.language as tl
 from scipy.optimize import differential_evolution, linprog, minimize
+
+import gpu_kernels as gk
 
 
 # Exact equiripple complex-Gaussian presets from Olli Niemitalo's kernel-optimizer (tau = 0.2).
@@ -297,13 +301,67 @@ def linear_to_srgb(x: np.ndarray) -> np.ndarray:
     return np.where(c <= 0.0031308, 12.92 * c, 1.055 * np.power(np.maximum(c, 1e-12), 1.0 / 2.4) - 0.055)
 
 
-def make_bokeh_test_image(H_img: int = 512, W_img: int = 512, seed: int = 7) -> np.ndarray:
+def unbalanced_per_component_channels_1d(x: np.ndarray, components):
+    """
+    Stage 1 (naive unbalanced per-component split): places polynomial/amplitude weights a_q on the
+    first pass H (written into the float16 intermediate buffer) and unit-scale basis functions
+    x^{2j} exp(lam x^2) on the second pass V (no sqrt(beta), S^2 rescaling, or L2 pair balancing).
+    """
+    s = x**2
+    H_list, V_list = [], []
+    for comp in components:
+        b = comp["b"]
+        deg = len(comp["coeffs"]) - 1
+        if comp["kind"] == "r":
+            eb = np.exp(-b * s)
+            for j in range(deg + 1):
+                uj = (s**j) * eb
+                wj = np.zeros_like(s)
+                for q in range(j, deg + 1):
+                    rq = comp["coeffs"][q][0]
+                    wj += math.comb(q, j) * rq * (s ** (q - j)) * eb
+                H_list.append(wj)
+                V_list.append(uj)
+        else:
+            c = comp["c"]
+            lam = -b + 1j * c
+            elam = np.exp(lam * s)
+            for j in range(deg + 1):
+                uj = (s**j) * elam
+                wj = np.zeros_like(s, dtype=np.complex128)
+                for q in range(j, deg + 1):
+                    aq = comp["coeffs"][q][0] - 1j * comp["coeffs"][q][1]
+                    wj += math.comb(q, j) * aq * (s ** (q - j)) * elam
+                H_list.append(np.real(wj))
+                V_list.append(np.real(uj))
+                H_list.append(-np.imag(wj))
+                V_list.append(np.imag(uj))
+    return np.array(H_list, dtype=np.float64), np.array(V_list, dtype=np.float64)
+
+
+def balance_channel_pairs_1d(H_in: np.ndarray, V_in: np.ndarray):
+    """
+    Stage 2 (pure diagonal channel-pair L2 balancing D in GL_R(R)): rescales each rank-1 channel
+    (h_n, v_n) -> (c_n h_n, v_n / c_n) so ||h_n||_2 == ||v_n||_2 while keeping every rank-1 outer
+    product h_n v_n^T (and hence kappa_inf and sum_n ||h_n||_2 ||v_n||_2) identically unchanged.
+    """
+    H_bal, V_bal = H_in.copy(), V_in.copy()
+    for n in range(H_bal.shape[0]):
+        nh = float(np.linalg.norm(H_bal[n]))
+        nv = float(np.linalg.norm(V_bal[n]))
+        if nh > 0.0 and nv > 0.0:
+            scale = math.sqrt(nv / nh)
+            H_bal[n] *= scale
+            V_bal[n] /= scale
+    return H_bal, V_bal
+
+
+def make_bokeh_test_image(H_img: int = 512, W_img: int = 512, seed: int = 7, peak_hdr: float = 48.0) -> np.ndarray:
     """
     Create a realistic scene-linear HDR test image:
       - Smooth background spanning deep night shadows (0.001 linear, inside the 12.92x sRGB toe)
         up to lit midtones (0.75 linear), plus a sharp circular object edge;
-      - 25 bright 3x3 HDR point glints (linear radiance 8..48, so blurring over a disc of radius
-        R_px = 25, area pi*25^2 ~= 1963 px, yields visible bokeh discs of 0.04..0.22 linear = 0.22..0.51 sRGB).
+      - 25 bright 3x3 HDR point glints (linear radiance in [peak_hdr/6, peak_hdr]).
     """
     rng = np.random.default_rng(seed)
     yy, xx = np.meshgrid(np.linspace(-1, 1, H_img), np.linspace(-1, 1, W_img), indexing="ij")
@@ -312,9 +370,100 @@ def make_bokeh_test_image(H_img: int = 512, W_img: int = 512, seed: int = 7) -> 
     for _ in range(25):
         cy = rng.integers(48, H_img - 48)
         cx = rng.integers(48, W_img - 48)
-        amp = rng.uniform(8.0, 48.0)
+        amp = rng.uniform(peak_hdr / 6.0, peak_hdr)
         img[cy - 1 : cy + 2, cx - 1 : cx + 2] += amp
     return img
+
+
+def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, peak_levels=(8.0, 48.0, 256.0)):
+    """
+    4-stage float16 sRGB bokeh conditioning ablation isolating each mechanism in `separableChannels`:
+      Stage 1 (unbalanced): raw per-component channels with weights on V (no intra-term norm balance);
+      Stage 2 (term_balanced): per-component channels with ||h_n||_2 == ||v_n||_2 (no GL_R rotation);
+      Stage 3 (orth_desc): GL_R(R) orthogonalized rowSpan channels accumulated LARGEST-|e_n| first;
+      Stage 4 (orth_asc): GL_R(R) orthogonalized rowSpan channels accumulated SMALLEST-|e_n| first.
+    Evaluated across `n_seeds` random 512x512 HDR scenes (peak=48) and across `peak_levels`.
+    """
+    L = math.ceil(1.2 * R_px)
+    x_grid = np.arange(-L, L + 1, dtype=np.float64) / R_px
+    target_labels = [
+        "1c (Gaussian)",
+        "2c (Gaussian)",
+        "1c_2 (deg 1 complex)",
+        "4c (Gaussian)",
+        "6c (Gaussian)",
+        "1c_6 (deg 5 complex)",
+    ]
+    scenes_48 = [make_bokeh_test_image(512, 512, seed=s, peak_hdr=48.0) for s in range(n_seeds)]
+    ablation_rows = []
+
+    for lbl in target_labels:
+        fam = next(f for f in families if f["label"] == lbl)
+        comps = fam["components"]
+        H_unb, V_unb = unbalanced_per_component_channels_1d(x_grid, comps)
+        H_bal, V_bal = balance_channel_pairs_1d(H_unb, V_unb)
+        H_asc, V_asc = orthogonal_rowspan_channels_1d(H_bal, V_bal)
+        H_desc, V_desc = H_asc[::-1].copy(), V_asc[::-1].copy()
+
+        K_ex = H_bal.T @ V_bal
+        k_peak = float(np.max(np.abs(K_ex)))
+        stages = [
+            ("unbalanced", H_unb, V_unb),
+            ("term_balanced", H_bal, V_bal),
+            ("orth_desc", H_desc, V_desc),
+            ("orth_asc", H_asc, V_asc),
+        ]
+        entry = {"label": lbl, "rank_R": fam["rank_2d"], "stages_20scenes_peak48": {}, "peak_sweep_seed7": {}}
+        for st_name, Hf, Vf in stages:
+            kappa_inf = float(np.sum(np.max(np.abs(Hf), axis=1) * np.max(np.abs(Vf), axis=1)) / k_peak)
+            kappa_l2 = float(np.sum(np.linalg.norm(Hf, axis=1) * np.linalg.norm(Vf, axis=1)) / np.linalg.norm(K_ex, ord="nuc"))
+            h_over_v = float(np.max(np.maximum(np.linalg.norm(Hf, axis=1) / np.maximum(np.linalg.norm(Vf, axis=1), 1e-30),
+                                               np.linalg.norm(Vf, axis=1) / np.maximum(np.linalg.norm(Hf, axis=1), 1e-30))))
+            max_srgb_list, rmse_srgb_list, max_lin_list = [], [], []
+            n_overflow = 0
+            for sc in scenes_48:
+                rm, mx, ln = simulate_separable_blur_precision(sc, Hf, Vf, torch.float16)
+                if not math.isfinite(mx):
+                    n_overflow += 1
+                else:
+                    max_srgb_list.append(255.0 * mx)
+                    rmse_srgb_list.append(255.0 * rm)
+                    max_lin_list.append(255.0 * ln)
+            entry["stages_20scenes_peak48"][st_name] = {
+                "kappa_inf": kappa_inf,
+                "nuclear_ratio": kappa_l2,
+                "max_factor_imbalance": h_over_v,
+                "n_overflow": n_overflow,
+                "srgb_max_mean": float(np.mean(max_srgb_list)) if max_srgb_list else float("inf"),
+                "srgb_max_std": float(np.std(max_srgb_list, ddof=1)) if len(max_srgb_list) > 1 else 0.0,
+                "srgb_max_worst": float(np.max(max_srgb_list)) if max_srgb_list else float("inf"),
+                "srgb_rmse_mean": float(np.mean(rmse_srgb_list)) if rmse_srgb_list else float("inf"),
+                "srgb_rmse_std": float(np.std(rmse_srgb_list, ddof=1)) if len(rmse_srgb_list) > 1 else 0.0,
+                "lin_max_mean": float(np.mean(max_lin_list)) if max_lin_list else float("inf"),
+            }
+
+        # HDR glint peak sweep at seed=7
+        for pk in peak_levels:
+            sc_pk = make_bokeh_test_image(512, 512, seed=7, peak_hdr=pk)
+            pk_dict = {}
+            for st_name, Hf, Vf in stages:
+                rm, mx, ln = simulate_separable_blur_precision(sc_pk, Hf, Vf, torch.float16)
+                pk_dict[st_name] = {
+                    "srgb_max_255": 255.0 * mx if math.isfinite(mx) else "overflow",
+                    "lin_max_255": 255.0 * ln if math.isfinite(ln) else "overflow",
+                }
+            entry["peak_sweep_seed7"][f"peak_{int(pk)}"] = pk_dict
+
+        s48 = entry["stages_20scenes_peak48"]
+        print(
+            f"Ablation {lbl:22s} (R={fam['rank_2d']:2d}): "
+            f"Unbal={s48['unbalanced']['srgb_max_mean']:7.2f}+/-{s48['unbalanced']['srgb_max_std']:4.2f} (ovf={s48['unbalanced']['n_overflow']}) | "
+            f"TermBal={s48['term_balanced']['srgb_max_mean']:6.2f}+/-{s48['term_balanced']['srgb_max_std']:4.2f} | "
+            f"OrthDesc={s48['orth_desc']['srgb_max_mean']:5.2f}+/-{s48['orth_desc']['srgb_max_std']:4.2f} | "
+            f"OrthAsc={s48['orth_asc']['srgb_max_mean']:5.2f}+/-{s48['orth_asc']['srgb_max_std']:4.2f}"
+        )
+        ablation_rows.append(entry)
+    return ablation_rows
 
 
 def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac: np.ndarray, dtype):
@@ -357,60 +506,6 @@ def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac:
     srgb_max = float(np.max(srgb_diff))
     lin_max = float(np.max(np.abs(alp - a64)))
     return srgb_rmse, srgb_max, lin_max
-
-
-@triton.jit
-def sym_blur2d_x_kernel(
-    inp_ptr, out_ptr, w_ptr, L_val,
-    H: tl.constexpr, W: tl.constexpr, C: tl.constexpr,
-    BLOCK_WC: tl.constexpr,
-):
-    y_id = tl.program_id(0)
-    wc_blk = tl.program_id(1)
-    offs_wc = wc_blk * BLOCK_WC + tl.arange(0, BLOCK_WC)
-    mask = offs_wc < (W * C)
-    x_idx = offs_wc // C
-    c_idx = offs_wc % C
-    row_base = y_id * W * C
-
-    w0 = tl.load(w_ptr + 0).to(tl.float32)
-    acc = tl.load(inp_ptr + row_base + offs_wc, mask=mask, other=0.0).to(tl.float32) * w0
-    for m in range(1, L_val + 1):
-        wm = tl.load(w_ptr + m).to(tl.float32)
-        xp = tl.minimum(x_idx + m, W - 1)
-        xm = tl.maximum(x_idx - m, 0)
-        vp = tl.load(inp_ptr + row_base + xp * C + c_idx, mask=mask, other=0.0).to(tl.float32)
-        vm = tl.load(inp_ptr + row_base + xm * C + c_idx, mask=mask, other=0.0).to(tl.float32)
-        acc += wm * (vp + vm)
-    tl.store(out_ptr + row_base + offs_wc, acc.to(out_ptr.dtype.element_ty), mask=mask)
-
-
-@triton.jit
-def sym_blur2d_y_accum_kernel(
-    inp_ptr, acc_ptr, w_ptr, L_val,
-    H: tl.constexpr, W: tl.constexpr, C: tl.constexpr, INIT_ACC: tl.constexpr,
-    BLOCK_WC: tl.constexpr,
-):
-    y_id = tl.program_id(0)
-    wc_blk = tl.program_id(1)
-    offs_wc = wc_blk * BLOCK_WC + tl.arange(0, BLOCK_WC)
-    mask = offs_wc < (W * C)
-    stride_y = W * C
-
-    w0 = tl.load(w_ptr + 0).to(tl.float32)
-    val = tl.load(inp_ptr + y_id * stride_y + offs_wc, mask=mask, other=0.0).to(tl.float32) * w0
-    for m in range(1, L_val + 1):
-        wm = tl.load(w_ptr + m).to(tl.float32)
-        yp = tl.minimum(y_id + m, H - 1)
-        ym = tl.maximum(y_id - m, 0)
-        vp = tl.load(inp_ptr + yp * stride_y + offs_wc, mask=mask, other=0.0).to(tl.float32)
-        vm = tl.load(inp_ptr + ym * stride_y + offs_wc, mask=mask, other=0.0).to(tl.float32)
-        val += wm * (vp + vm)
-    if INIT_ACC:
-        tl.store(acc_ptr + y_id * stride_y + offs_wc, val.to(acc_ptr.dtype.element_ty), mask=mask)
-    else:
-        prev = tl.load(acc_ptr + y_id * stride_y + offs_wc, mask=mask, other=0.0).to(tl.float32)
-        tl.store(acc_ptr + y_id * stride_y + offs_wc, (prev + val).to(acc_ptr.dtype.element_ty), mask=mask)
 
 
 def optimize_discrete_disc_rank_r(R_px: int, R_rank: int, K_seed: np.ndarray, tau: float = 0.2, shell_isotropic: bool = False):
@@ -574,105 +669,220 @@ def evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2
     return {"summary": rows, "kernels_R4": saved_kernels}
 
 
-def benchmark_blur2d_gpu(H_img: int = 1080, W_img: int = 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12)):
-    """Benchmark 1920x1080 RGBA 2-D blur on RTX 4070 Ti Super: Direct WxW, cuFFT rfft2 (zero- & replicate-padded), and Triton Separable."""
-    from scipy.fft import next_fast_len
+def normalized_half_stencils(R_px: int, components):
+    """
+    Orthogonal rowSpan channels of a family sampled at radius R_px, scaled to unit DC gain, as half
+    stencils: returns (L, Hh, Vh) with Hh, Vh of shape (N, L + 1) and K[i, j] = sum_n Hh[n, |i|] Vh[n, |j|].
+    """
+    L = math.ceil(1.2 * R_px)
+    x = np.arange(-L, L + 1, dtype=np.float64) / R_px
+    H_fac, V_fac = orthogonal_rowspan_channels_1d(*per_component_channels_1d(x, components, S=1.2))
+    ksum = float(np.sum(H_fac.T @ V_fac))
+    s_norm = 1.0 / math.sqrt(abs(ksum))
+    H_fac, V_fac = H_fac * s_norm, V_fac * (s_norm if ksum > 0 else -s_norm)
+    assert np.allclose(H_fac, H_fac[:, ::-1]) and np.allclose(V_fac, V_fac[:, ::-1])
+    return L, H_fac[:, L:].copy(), V_fac[:, L:].copy()
 
-    device = torch.device("cuda")
+
+def reference_blur64(img64: torch.Tensor, Hh: np.ndarray, Vh: np.ndarray, mode: str = "replicate") -> torch.Tensor:
+    """float64 separable blur of an (H, W, C) image with `mode` ("replicate" or "constant") borders."""
+    L = Hh.shape[1] - 1
+    C = img64.shape[2]
+    x = img64.permute(2, 0, 1)[None]
+    px = F.pad(x, (L, L, 0, 0), mode=mode)
+    acc = torch.zeros_like(x)
+    for n in range(Hh.shape[0]):
+        hx = torch.tensor(np.concatenate([Hh[n, :0:-1], Hh[n]]), device=x.device)[None, None, None, :].repeat(C, 1, 1, 1)
+        vy = torch.tensor(np.concatenate([Vh[n, :0:-1], Vh[n]]), device=x.device)[None, None, :, None].repeat(C, 1, 1, 1)
+        acc += F.conv2d(F.pad(F.conv2d(px, hx, groups=C), (0, 0, L, L), mode=mode), vy, groups=C)
+    return acc[0].permute(1, 2, 0).contiguous()
+
+
+GPU_BENCHMARK_INFO = {
+    "image": "1080 x 1920 RGBA, independent uniform [0, 1) samples (torch.Generator seed 0)",
+    "kernels": "sampled 2c/4c/6c complex-Gaussian disc families (ranks 4/8/12) as orthogonal rowSpan channels "
+               "with unit DC gain; direct and cuFFT use the dense rank-4 kernel",
+    "errors": "err_max_* and err_rms_* are absolute errors of each method's output against a float64 separable "
+              "convolution with the same border rule (replicate, or zero for cufft_zero); float16 errors "
+              "include rounding the input image to float16",
+    "timing": "mean and standard deviation in ms over 10 CUDA-Event batches (15 calls each; direct: 2 to 5); "
+              "launch parameters (config_*) are tuned by timing at start-up, and means differed by up to 6% "
+              "between two complete runs, more than the within-run standard deviations",
+    "direct": "Triton dense W x W convolution, several output rows per program sharing each row load",
+    "cufft": "channel pairs packed as complex planes, in-place complex FFT, real even-kernel spectrum; "
+             "7-smooth period chosen by timing; zero padding (period >= size + L) or replicate padding "
+             "(period >= size + 2L)",
+    "sep": "Triton vertical fan-out and horizontal fan-in passes with register sliding windows over "
+           "L2-resident strips (float32, or float16 input, intermediates and output with float32 accumulation)",
+}
+
+
+def benchmark_blur2d_gpu(families, H_img: int = 1080, W_img: int = 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12)):
+    """
+    Benchmark 1920x1080 RGBA 2-D blur on RTX 4070 Ti Super (10 CUDA-Event batches: mean +/- std) and
+    measure every method's error against a float64 reference (see GPU_BENCHMARK_INFO).
+    """
+    rank_to_lbl = {4: "2c (Gaussian)", 8: "4c (Gaussian)", 12: "6c (Gaussian)"}
     C = 4
-    inp32 = torch.randn((H_img, W_img, C), device=device, dtype=torch.float32)
-    inp_nchw = torch.randn((1, C, H_img, W_img), device=device, dtype=torch.float32)
+    gen = torch.Generator().manual_seed(0)
+    img64 = torch.rand((H_img, W_img, C), generator=gen, dtype=torch.float64).cuda()
+    img32 = img64.to(torch.float32)
+    out32 = torch.empty_like(img32)
+
+    def as_pairs(t):
+        return t.reshape(H_img, W_img, 2, 2).permute(2, 0, 1, 3).contiguous()
+
+    pairs32 = as_pairs(img32)
     results = []
-
     for R_px in radii:
-        L = math.ceil(R_px * 1.2)
-        W_tap = 2 * L + 1
-
-        # 1. Direct 2-D depthwise conv2d in fp32 (replicate-clamped borders)
-        k2d = torch.randn((C, 1, W_tap, W_tap), device=device, dtype=torch.float32)
-        for _ in range(4):
-            F.conv2d(F.pad(inp_nchw, (L, L, L, L), mode="replicate"), k2d, groups=C)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        n_dir = 10 if R_px <= 16 else 5
-        for _ in range(n_dir):
-            F.conv2d(F.pad(inp_nchw, (L, L, L, L), mode="replicate"), k2d, groups=C)
-        torch.cuda.synchronize()
-        ms_direct = 1000.0 * (time.perf_counter() - t0) / n_dir
-
-        # 2a. Zero-padded cuFFT rfft2/irfft2 (linear convolution with precomputed filter spectrum)
-        Hz = next_fast_len(H_img + W_tap - 1)
-        Wz = next_fast_len(W_img + W_tap - 1)
-        kz_hat = torch.randn((1, 1, Hz, Wz // 2 + 1), device=device, dtype=torch.complex64)
-        for _ in range(10):
-            _ = torch.fft.irfft2(torch.fft.rfft2(inp_nchw, s=(Hz, Wz)) * kz_hat, s=(Hz, Wz))[:, :, :H_img, :W_img]
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        for _ in range(50):
-            _ = torch.fft.irfft2(torch.fft.rfft2(inp_nchw, s=(Hz, Wz)) * kz_hat, s=(Hz, Wz))[:, :, :H_img, :W_img]
-        torch.cuda.synchronize()
-        ms_fft2_zero = 1000.0 * (time.perf_counter() - t0) / 50.0
-
-        # 2b. Replicate-padded cuFFT rfft2/irfft2 (exact same clamped border semantics as Direct & Triton!)
-        Hr = next_fast_len(H_img + 2 * L + W_tap - 1)
-        Wr = next_fast_len(W_img + 2 * L + W_tap - 1)
-        kr_hat = torch.randn((1, 1, Hr, Wr // 2 + 1), device=device, dtype=torch.complex64)
-        for _ in range(10):
-            pad_in = F.pad(inp_nchw, (L, L, L, L), mode="replicate")
-            _ = torch.fft.irfft2(torch.fft.rfft2(pad_in, s=(Hr, Wr)) * kr_hat, s=(Hr, Wr))[:, :, 2 * L : 2 * L + H_img, 2 * L : 2 * L + W_img]
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        for _ in range(50):
-            pad_in = F.pad(inp_nchw, (L, L, L, L), mode="replicate")
-            _ = torch.fft.irfft2(torch.fft.rfft2(pad_in, s=(Hr, Wr)) * kr_hat, s=(Hr, Wr))[:, :, 2 * L : 2 * L + H_img, 2 * L : 2 * L + W_img]
-        torch.cuda.synchronize()
-        ms_fft2_rep = 1000.0 * (time.perf_counter() - t0) / 50.0
-
+        stencils = {}
         for N_rank in ranks:
-            row = {
-                "radius_px": R_px,
-                "L": L,
-                "W_tap": W_tap,
-                "rank_N": N_rank,
-                "fft_shape_zero": [Hz, Wz],
-                "fft_shape_rep": [Hr, Wr],
-                "ms_direct_fp32": ms_direct,
-                "ms_rfft2_zero_fp32": ms_fft2_zero,
-                "ms_rfft2_rep_fp32": ms_fft2_rep,
-            }
-            grid = (H_img, triton.cdiv(W_img * C, 512))
-            for dtype, key in [(torch.float32, "ms_sep_fp32"), (torch.float16, "ms_sep_fp16")]:
-                inp_d = inp32.to(dtype)
-                mid_d = torch.empty_like(inp_d)
-                acc_d = torch.empty_like(inp_d)
-                ws = [
-                    (torch.randn(L + 1, device=device, dtype=torch.float32),
-                     torch.randn(L + 1, device=device, dtype=torch.float32))
-                    for _ in range(N_rank)
-                ]
-                for _ in range(8):
-                    for n in range(N_rank):
-                        sym_blur2d_x_kernel[grid](inp_d, mid_d, ws[n][0], L, H=H_img, W=W_img, C=C, BLOCK_WC=512)
-                        sym_blur2d_y_accum_kernel[grid](mid_d, acc_d, ws[n][1], L, H=H_img, W=W_img, C=C, INIT_ACC=(n == 0), BLOCK_WC=512)
-                torch.cuda.synchronize()
-                t0 = time.perf_counter()
-                iters = 50
-                for _ in range(iters):
-                    for n in range(N_rank):
-                        sym_blur2d_x_kernel[grid](inp_d, mid_d, ws[n][0], L, H=H_img, W=W_img, C=C, BLOCK_WC=512)
-                        sym_blur2d_y_accum_kernel[grid](mid_d, acc_d, ws[n][1], L, H=H_img, W=W_img, C=C, INIT_ACC=(n == 0), BLOCK_WC=512)
-                torch.cuda.synchronize()
-                row[key] = 1000.0 * (time.perf_counter() - t0) / iters
+            fam = next(f for f in families if f["label"] == rank_to_lbl[N_rank])
+            L, Hh, Vh = normalized_half_stencils(R_px, fam["components"])
+            assert Hh.shape[0] == N_rank
+            stencils[N_rank] = (Hh, Vh)
+        W_tap = 2 * L + 1
+        Hh0, Vh0 = stencils[ranks[0]]
+        K2 = np.concatenate([Hh0[:, :0:-1], Hh0], axis=1).T @ np.concatenate([Vh0[:, :0:-1], Vh0], axis=1)
+        ref0 = reference_blur64(img64, Hh0, Vh0)
+        shared = {"radius_px": R_px, "L": L, "W_tap": W_tap}
+
+        # 1. Direct dense W x W convolution in fp32 (replicate-clamped borders)
+        direct = gk.DirectBlur2D.tuned(K2, img32, out32)
+        out32.zero_()
+        ms, std = gk.cuda_batch_stats(lambda: direct(img32, out32), warmup=3, n_batches=10, iters_per_batch=(5 if R_px <= 16 else 2))
+        e_max, e_rms = gk.max_rms_error(out32, ref0)
+        shared.update({"ms_direct_fp32": ms, "ms_direct_fp32_std": std, "err_max_direct_fp32": e_max,
+                       "err_rms_direct_fp32": e_rms, "config_direct": direct.config})
+
+        # 2. cuFFT with zero padding and with replicate padding (same borders as direct and separable)
+        for mode, pad_mode in (("zero", "constant"), ("clamp", "replicate")):
+            ref_m = ref0 if mode == "clamp" else reference_blur64(img64, Hh0, Vh0, mode=pad_mode)
+            fft = gk.FFTBlur2D.tuned(K2, pairs32, mode)
+            ms, std = gk.cuda_batch_stats(lambda: fft(pairs32), warmup=8, n_batches=10, iters_per_batch=15)
+            e_max, e_rms = gk.max_rms_error(fft(pairs32), as_pairs(ref_m))
+            shared.update({f"ms_cufft_{mode}_fp32": ms, f"ms_cufft_{mode}_fp32_std": std,
+                           f"err_max_cufft_{mode}_fp32": e_max, f"err_rms_cufft_{mode}_fp32": e_rms,
+                           f"config_cufft_{mode}": fft.config})
+            del fft
+
+        # 3. Separable rank-N cascades in fp32 and fp16
+        for N_rank in ranks:
+            Hh, Vh = stencils[N_rank]
+            ref = ref0 if N_rank == ranks[0] else reference_blur64(img64, Hh, Vh)
+            row = dict(shared, rank_N=N_rank)
+            for dtype, key in [(torch.float32, "sep_fp32"), (torch.float16, "sep_fp16")]:
+                inp_d = img64.to(dtype)
+                out_d = torch.empty_like(inp_d)
+                sep = gk.SeparableBlur2D.tuned(Hh, Vh, inp_d, out_d)
+                out_d.zero_()
+                ms, std = gk.cuda_batch_stats(lambda: sep(inp_d, out_d), warmup=8, n_batches=10, iters_per_batch=15)
+                e_max, e_rms = gk.max_rms_error(out_d, ref)
+                assert e_max < (1e-5 if dtype == torch.float32 else 2e-3), f"{key} error {e_max} at R_px={R_px}, N={N_rank}"
+                row.update({f"ms_{key}": ms, f"ms_{key}_std": std, f"err_max_{key}": e_max, f"err_rms_{key}": e_rms,
+                            f"config_{key}": sep.config})
+                del sep
+            assert max(row["err_max_direct_fp32"], row["err_max_cufft_zero_fp32"], row["err_max_cufft_clamp_fp32"]) < 2e-5
             print(
                 f"1920x1080 RGBA R_px={R_px} (W={W_tap}), N={N_rank}: "
-                f"Direct={ms_direct:.2f} ms | cuFFT(zero/rep)={ms_fft2_zero:.2f}/{ms_fft2_rep:.2f} ms | "
-                f"Sep fp32={row['ms_sep_fp32']:.3f} ms | Sep fp16={row['ms_sep_fp16']:.3f} ms"
+                f"Direct={row['ms_direct_fp32']:.2f}+/-{row['ms_direct_fp32_std']:.2f} ms (err {row['err_max_direct_fp32']:.1e}) | "
+                f"cuFFT(zero/clamp)={row['ms_cufft_zero_fp32']:.3f}/{row['ms_cufft_clamp_fp32']:.3f} ms "
+                f"(err {row['err_max_cufft_zero_fp32']:.1e}/{row['err_max_cufft_clamp_fp32']:.1e}) | "
+                f"Sep fp32={row['ms_sep_fp32']:.3f}+/-{row['ms_sep_fp32_std']:.3f} ms (err {row['err_max_sep_fp32']:.1e}) | "
+                f"Sep fp16={row['ms_sep_fp16']:.3f}+/-{row['ms_sep_fp16_std']:.3f} ms (err {row['err_max_sep_fp16']:.1e})"
             )
             results.append(row)
     return results
 
 
+def benchmark_blur2d_cpu(H_img: int = 1080, W_img: int = 1920, radii=(8, 16, 32), ranks=(4, 8)):
+    """Multi-core CPU reference timings (Intel Core Ultra 5 125H, float32, 5 runs: mean +/- std)."""
+    from scipy.fft import next_fast_len
+
+    C = 4
+    inp_cpu = torch.randn((1, C, H_img, W_img), dtype=torch.float32)
+    rows = []
+
+    def _cpu_stats(fn, warmup: int = 1, n_runs: int = 5):
+        for _ in range(warmup):
+            fn()
+        ts = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            fn()
+            ts.append(1000.0 * (time.perf_counter() - t0))
+        arr = np.array(ts, dtype=np.float64)
+        return float(np.mean(arr)), float(np.std(arr, ddof=1))
+
+    for R_px in radii:
+        L = math.ceil(R_px * 1.2)
+        W_tap = 2 * L + 1
+        k2d = torch.randn((C, 1, W_tap, W_tap), dtype=torch.float32)
+        ms_dir, std_dir = _cpu_stats(
+            lambda: F.conv2d(F.pad(inp_cpu, (L, L, L, L), mode="replicate"), k2d, groups=C),
+            warmup=1, n_runs=(4 if R_px <= 16 else 3),
+        )
+        Hr = next_fast_len(H_img + 2 * L + W_tap - 1)
+        Wr = next_fast_len(W_img + 2 * L + W_tap - 1)
+        kr_hat = torch.randn((1, 1, Hr, Wr // 2 + 1), dtype=torch.complex64)
+        def _cpu_fft():
+            pad_in = F.pad(inp_cpu, (L, L, L, L), mode="replicate")
+            return torch.fft.irfft2(torch.fft.rfft2(pad_in, s=(Hr, Wr)) * kr_hat, s=(Hr, Wr))[:, :, 2 * L : 2 * L + H_img, 2 * L : 2 * L + W_img]
+        ms_fft, std_fft = _cpu_stats(_cpu_fft, warmup=1, n_runs=5)
+
+        entry = {
+            "radius_px": R_px,
+            "W_tap": W_tap,
+            "ms_direct_fp32": ms_dir,
+            "ms_direct_fp32_std": std_dir,
+            "ms_rfft2_rep_fp32": ms_fft,
+            "ms_rfft2_rep_fp32_std": std_fft,
+            "separable": {},
+        }
+        for N_rank in ranks:
+            h1d = [torch.randn((C, 1, 1, W_tap), dtype=torch.float32) for _ in range(N_rank)]
+            v1d = [torch.randn((C, 1, W_tap, 1), dtype=torch.float32) for _ in range(N_rank)]
+            def _cpu_sep():
+                acc = None
+                px = F.pad(inp_cpu, (L, L, 0, 0), mode="replicate")
+                for n in range(N_rank):
+                    m = F.conv2d(px, h1d[n], groups=C)
+                    out_n = F.conv2d(F.pad(m, (0, 0, L, L), mode="replicate"), v1d[n], groups=C)
+                    acc = out_n if acc is None else (acc + out_n)
+                return acc
+            ms_s, std_s = _cpu_stats(_cpu_sep, warmup=1, n_runs=5)
+            entry["separable"][f"R_{N_rank}"] = {"ms_fp32": ms_s, "ms_fp32_std": std_s}
+        print(
+            f"CPU 1920x1080 RGBA R_px={R_px:2d} (W={W_tap:2d}): "
+            f"Direct={ms_dir:.1f}+/-{std_dir:.1f} ms | FFT(clamp)={ms_fft:.1f}+/-{std_fft:.1f} ms | "
+            f"Sep R=4={entry['separable']['R_4']['ms_fp32']:.1f} ms | Sep R=8={entry['separable']['R_8']['ms_fp32']:.1f} ms"
+        )
+        rows.append(entry)
+    return rows
+
+
+RESULTS_PATH = os.path.join(os.path.dirname(__file__), "results_blur_2d.json")
+GPU_BENCH_TITLE = "\n=== RTX 4070 Ti Super 2-D Blur Throughput (10 batches: mean +/- std) ==="
+
+
+def rerun_gpu_benchmark():
+    """Rerun only the GPU throughput benchmark from the stored families and update the stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    print(GPU_BENCH_TITLE)
+    results["gpu_benchmark"] = benchmark_blur2d_gpu(results["families"], 1080, 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12))
+    results["gpu_benchmark_info"] = GPU_BENCHMARK_INFO
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated GPU benchmark in {RESULTS_PATH}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU throughput benchmark")
+    if parser.parse_args().gpu_only:
+        return rerun_gpu_benchmark()
+
     s2, tgt2, _, _ = make_disc_grid(tau=0.2, dim_corner=2, n_pass=1000, n_stop=1000)
     s3, tgt3, _, _ = make_disc_grid(tau=0.2, dim_corner=3, n_pass=1000, n_stop=1000)
 
@@ -791,11 +1001,17 @@ def main():
             f"(max {255*max_raw16:9.2f} -> {255*max_orth16:5.2f})"
         )
 
+    print("\n=== 4-Stage separableChannels Conditioning Ablation (20 HDR scenes & peak sweep) ===")
+    cond_ablation = evaluate_conditioning_ablation(families, R_px=25, n_seeds=20, peak_levels=(8.0, 48.0, 256.0))
+
     print("\n=== Direct Discrete Optimization vs Sampled Continuous Profiles ===")
     disc_vs_cont = evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2, 4, 8, 12))
 
-    print("\n=== RTX 4070 Ti Super 2-D Blur Throughput ===")
-    gpu_bench = benchmark_blur2d_gpu(1080, 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12))
+    print(GPU_BENCH_TITLE)
+    gpu_bench = benchmark_blur2d_gpu(families, 1080, 1920, radii=(8, 16, 32, 64), ranks=(4, 8, 12))
+
+    print("\n=== Multi-Core CPU 2-D Blur Reference Timings ===")
+    cpu_bench = benchmark_blur2d_cpu(1080, 1920, radii=(8, 16, 32), ranks=(4, 8))
 
     # Save curves for Figure 1 as well
     r_plot = np.linspace(0.0, 1.85, 600)
@@ -805,14 +1021,17 @@ def main():
         if fam["label"] in {"1c (Gaussian)", "1c+1r", "2c (Gaussian)", "1c_2 (deg 1 complex)", "4c (Gaussian)", "6c (Gaussian)", "1r_4 (deg 3 real)"}:
             curves[fam["label"]] = eval_components_profile(s_plot, fam["components"]).tolist()
 
-    out_path = os.path.join(os.path.dirname(__file__), "results_blur_2d.json")
+    out_path = RESULTS_PATH
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "families": families,
                 "conditioning": conditioning_rows,
+                "conditioning_ablation": cond_ablation,
                 "discrete_vs_continuous": disc_vs_cont,
                 "gpu_benchmark": gpu_bench,
+                "gpu_benchmark_info": GPU_BENCHMARK_INFO,
+                "cpu_benchmark": cpu_bench,
                 "profile_curves": curves,
             },
             f,

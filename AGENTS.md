@@ -22,9 +22,9 @@
 - `Applications/`: reproducible Python/SciPy/PyTorch/Triton numerical optimization, simulation,
   and GPU benchmark scripts (`blur_2d.py`, `acoustics_3d.py`, `generate_figures.py`, JSON
   results) accompanying Section 5 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
-  and all Matplotlib/`uv`/Triton caches inside `.tmp/`). In Triton kernels with wider stencils
-  (e.g. `L = 77`), use a runtime `range(1, L_val + 1)` loop rather than `tl.static_range` to
-  avoid register spilling.
+  and all Matplotlib/`uv`/Triton caches inside `.tmp/`). `gpu_kernels.py` holds the GPU
+  implementations (separable, direct, `cuFFT`) used by both scripts; see "GPU benchmarks" below.
+  `--gpu-only` on either script reruns only its GPU parts from the stored optimization results.
 - `paper/`: LaTeX source (`main.tex`), vector figures (`fig_overview_pipeline.pdf`,
   `fig_blur_2d.pdf`, `fig_acoustics_3d.pdf`), compiled PDF (`main.pdf`), and metadata
   (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper`
@@ -185,6 +185,39 @@
   ultrafilter. Porting Isabelle's power estimate to Lean needs `‖1‖ = 1`, which Mathlib gives
   operator algebras only on a nontrivial space; the translate space is trivial for the zero
   profile.
+
+## GPU benchmarks (`Applications/gpu_kernels.py`)
+
+- **Always check accuracy.** Every benchmarked method is compared with a `float64` reference in
+  the same run (`err_max_*`, `err_rms_*` in the JSON, with assertions). Keep this for any new
+  variant: it caught partial block coverage, a wrong border map, and a cuDNN algorithm switch.
+  The 3-D wave simulation and room test use the benchmarked `SeparableStep3D`/`KSpaceStep3D`,
+  so compare their stored errors before and after a change.
+- Measured cost model on the RTX 4070 Ti Super: DRAM about 610 GB/s (one pass over a 1080p RGBA
+  `float32` frame or a `256^3` field is about 0.05 to 0.11 ms per buffer); buffers up to about
+  32 MB stay L2-resident (above 2 TB/s); rows pulled from L2 into an SM about 3.3 TB/s in total;
+  arithmetic peaks near `2.2e13` FMA/s. Clamped gather loads cost the same as aligned vector
+  loads. What matters is DRAM passes, rows re-read from L2 per output, and instruction count.
+- Design: register sliding windows of `K` rows with rotation unrolling (no register moves, no
+  tap padding), all `R` terms per pass (fan-out first, fan-in last), strips/slabs sized to the
+  L2 cache. A FIR can only be windowed along an axis that is strided in memory, hence the
+  transposed 2-D strip intermediates and the thread-owned `z` runs in 3-D.
+- Kernels that depend on `K`, `R`, `L` are generated as source and compiled through `linecache`
+  (`_generate`). Keep `R * K * (elements per thread)` near 100 or less: around 250 registers per
+  thread the kernel spills and runs about 100 times slower. Large `K * R` also compiles slowly.
+- A Triton launch costs about 10 us through `kernel[grid](...)` and about 6 us through the cached
+  compiled kernel (`Launcher`). Triton specializes integer arguments equal to 1, so arguments
+  that vary between launches must be in `do_not_specialize`. Strip/slab loops are launch-bound
+  if they use more than two or three launches per strip.
+- Window initial rows must use the same border map (clamp or reflect) as later rows, also for
+  rows beyond the last output when `K` does not divide the size.
+- `torch.fft`: `out=` adds a copy; `norm="forward"` on the inverse avoids a scaling pass;
+  half-precision transforms overflow/underflow here; cuDNN `conv3d` at `W = 17` silently uses an
+  FFT algorithm with `4e-4` error, and depthwise `conv2d` is 5 times slower than the Triton
+  direct kernel.
+- The first benchmark run compiles kernels for many minutes; later runs reuse
+  `.tmp/cache/triton`. Mean timings vary by up to about 6% between complete runs (tuner choices,
+  buffer placement), more than the within-run standard deviations.
 
 ## Lean gotchas met so far
 

@@ -9,8 +9,13 @@
      on [-L, L]^3.
   4. Runs 3-D broadband spherical wave propagation on 256^3 voxels on RTX 4070 Ti Super against
      the exact analytical 3-D D'Alembert radial solution, plus a 1,000-step rigid-wall 3-D room
-     Neumann stability/energy test and hardware-fair GPU throughput benchmarks.
+     Neumann stability/energy test and hardware-fair GPU throughput benchmarks (separable, direct
+     and k-space steps from gpu_kernels.py, each checked against a float64 step).
+
+Run with --gpu-only to rerun just the GPU parts (wave simulation, room test and throughput benchmarks)
+from the stored propagators.
 """
+import argparse
 import json
 import math
 import os
@@ -21,6 +26,8 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 from scipy.optimize import differential_evolution, linprog, minimize
+
+import gpu_kernels as gk
 
 
 def verify_iwb_is_single_real_gaussian():
@@ -276,6 +283,14 @@ def evaluate_baseline_octant(scheme: str, nu: float, K_oct: np.ndarray, kmag_oct
         c2x, c2y, c2z = np.cos(2 * kx), np.cos(2 * ky), np.cos(2 * kz)
         lap = (8.0 / 3.0) * (cx + cy + cz - 3.0) - (1.0 / 6.0) * (c2x + c2y + c2z - 3.0)
         M = 2.0 + (nu**2) * lap
+    elif scheme == "fdtd_25pt_o4":
+        # Exact O(dx^4, dt^4) fourth-order compact explicit 25-point scheme (Tuomela / Hamilton & Bilbao 2016):
+        # Matches 2 cos(nu ||k||_2) through O(k^4) in all 3-D directions; CFL limit nu_max = 1 / sqrt(3).
+        c2x, c2y, c2z = np.cos(2 * kx), np.cos(2 * ky), np.cos(2 * kz)
+        c1 = (8.0 / 3.0) * (nu**2) - 2.0 * (nu**4)
+        c2 = ((nu**4) - (nu**2)) / 6.0
+        c11 = (2.0 / 3.0) * (nu**4)
+        M = 2.0 + c1 * (cx + cy + cz - 3.0) + c2 * (c2x + c2y + c2z - 3.0) + c11 * (cx * cy + cy * cz + cz * cx - 3.0)
     elif scheme == "iwb_27pt":
         M = 2.0 - 4.0 * (nu**2) + 0.5 * (nu**2) * (1.0 + cx) * (1.0 + cy) * (1.0 + cz)
     else:
@@ -521,7 +536,7 @@ def verify_3d_stencil_reconstruction(L: int, comps, alpha0: float, factors_exact
     return err
 
 
-# === Fused Triton Kernels (7-pt FDTD, 27-pt IWB, and R-term Separable Symmetric 1-D Cascades) ===
+# === Fused single-pass Triton kernels for the compact FDTD baselines (7-pt, 13-pt, 27-pt IWB, 25-pt) ===
 
 @triton.jit
 def fdtd7_triton_kernel(p_curr_ptr, p_prev_ptr, p_next_ptr, nu2, G: tl.constexpr, BLOCK_Z: tl.constexpr):
@@ -596,95 +611,123 @@ def iwb27_triton_kernel(p_curr_ptr, p_prev_ptr, p_next_ptr, nu2, G: tl.constexpr
 
 
 @triton.jit
-def sym_conv1d_z_kernel(inp_ptr, out_ptr, w_ptr, L_val, G: tl.constexpr, BLOCK_Z: tl.constexpr):
-    row_id = tl.program_id(0)
+def fdtd13_o4_triton_kernel(p_curr_ptr, p_prev_ptr, p_next_ptr, nu2, G: tl.constexpr, BLOCK_Z: tl.constexpr):
+    """Fused single-pass 13-point O(dx^4, dt^2) axial FDTD kernel with half-sample Neumann reflection."""
+    xy = tl.program_id(0)
+    x_id = xy // G
+    y_id = xy % G
     z_blk = tl.program_id(1)
     offs_z = z_blk * BLOCK_Z + tl.arange(0, BLOCK_Z)
     mask = offs_z < G
-    base = row_id * G
-    w0 = tl.load(w_ptr + 0).to(tl.float32)
-    acc = tl.load(inp_ptr + base + offs_z, mask=mask, other=0.0).to(tl.float32) * w0
-    for m in range(1, L_val + 1):
-        wm = tl.load(w_ptr + m).to(tl.float32)
-        zp = offs_z + m
-        zp_ref = tl.where(zp >= G, 2 * G - 1 - zp, zp)
-        zm = offs_z - m
-        zm_ref = tl.where(zm < 0, -1 - zm, zm)
-        vp = tl.load(inp_ptr + base + zp_ref, mask=mask, other=0.0).to(tl.float32)
-        vm = tl.load(inp_ptr + base + zm_ref, mask=mask, other=0.0).to(tl.float32)
-        acc += wm * (vp + vm)
-    tl.store(out_ptr + base + offs_z, acc.to(out_ptr.dtype.element_ty), mask=mask)
+
+    xm1 = tl.where(x_id - 1 < 0, -1 - (x_id - 1), x_id - 1)
+    xp1 = tl.where(x_id + 1 >= G, 2 * G - 1 - (x_id + 1), x_id + 1)
+    xm2 = tl.where(x_id - 2 < 0, -1 - (x_id - 2), x_id - 2)
+    xp2 = tl.where(x_id + 2 >= G, 2 * G - 1 - (x_id + 2), x_id + 2)
+
+    ym1 = tl.where(y_id - 1 < 0, -1 - (y_id - 1), y_id - 1)
+    yp1 = tl.where(y_id + 1 >= G, 2 * G - 1 - (y_id + 1), y_id + 1)
+    ym2 = tl.where(y_id - 2 < 0, -1 - (y_id - 2), y_id - 2)
+    yp2 = tl.where(y_id + 2 >= G, 2 * G - 1 - (y_id + 2), y_id + 2)
+
+    zm1 = tl.where(offs_z - 1 < 0, -1 - (offs_z - 1), offs_z - 1)
+    zp1 = tl.where(offs_z + 1 >= G, 2 * G - 1 - (offs_z + 1), offs_z + 1)
+    zm2 = tl.where(offs_z - 2 < 0, -1 - (offs_z - 2), offs_z - 2)
+    zp2 = tl.where(offs_z + 2 >= G, 2 * G - 1 - (offs_z + 2), offs_z + 2)
+
+    c = tl.load(p_curr_ptr + (x_id * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    pm = tl.load(p_prev_ptr + (x_id * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    s1 = (
+        tl.load(p_curr_ptr + (xp1 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm1 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + yp1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + ym1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zp1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zm1, mask=mask, other=0.0)
+    )
+    s2 = (
+        tl.load(p_curr_ptr + (xp2 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm2 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + yp2) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + ym2) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zp2, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zm2, mask=mask, other=0.0)
+    )
+    lap = (4.0 / 3.0) * s1 - (1.0 / 12.0) * s2 - 7.5 * c
+    tl.store(p_next_ptr + (x_id * G + y_id) * G + offs_z, 2.0 * c + nu2 * lap - pm, mask=mask)
 
 
 @triton.jit
-def sym_conv1d_y_kernel(inp_ptr, out_ptr, w_ptr, L_val, G: tl.constexpr, BLOCK_Z: tl.constexpr, BLOCK_Y: tl.constexpr):
-    x_id = tl.program_id(0)
-    y_blk = tl.program_id(1)
-    z_blk = tl.program_id(2)
-    offs_y = y_blk * BLOCK_Y + tl.arange(0, BLOCK_Y)[:, None]
-    offs_z = z_blk * BLOCK_Z + tl.arange(0, BLOCK_Z)[None, :]
-    mask = (offs_y < G) & (offs_z < G)
-    base_x = x_id * G * G
-    w0 = tl.load(w_ptr + 0).to(tl.float32)
-    acc = tl.load(inp_ptr + base_x + offs_y * G + offs_z, mask=mask, other=0.0).to(tl.float32) * w0
-    for m in range(1, L_val + 1):
-        wm = tl.load(w_ptr + m).to(tl.float32)
-        yp = offs_y + m
-        yp_ref = tl.where(yp >= G, 2 * G - 1 - yp, yp)
-        ym = offs_y - m
-        ym_ref = tl.where(ym < 0, -1 - ym, ym)
-        vp = tl.load(inp_ptr + base_x + yp_ref * G + offs_z, mask=mask, other=0.0).to(tl.float32)
-        vm = tl.load(inp_ptr + base_x + ym_ref * G + offs_z, mask=mask, other=0.0).to(tl.float32)
-        acc += wm * (vp + vm)
-    tl.store(out_ptr + base_x + offs_y * G + offs_z, acc.to(out_ptr.dtype.element_ty), mask=mask)
+def fdtd25_o4_triton_kernel(p_curr_ptr, p_prev_ptr, p_next_ptr, w0, w_face, w_ax2, w_edge, G: tl.constexpr, BLOCK_Z: tl.constexpr):
+    """Fused single-pass 25-point O(dx^4, dt^4) compact explicit FDTD kernel (Hamilton & Bilbao 2016)."""
+    xy = tl.program_id(0)
+    x_id = xy // G
+    y_id = xy % G
+    z_blk = tl.program_id(1)
+    offs_z = z_blk * BLOCK_Z + tl.arange(0, BLOCK_Z)
+    mask = offs_z < G
+
+    xm1 = tl.where(x_id - 1 < 0, -1 - (x_id - 1), x_id - 1)
+    xp1 = tl.where(x_id + 1 >= G, 2 * G - 1 - (x_id + 1), x_id + 1)
+    xm2 = tl.where(x_id - 2 < 0, -1 - (x_id - 2), x_id - 2)
+    xp2 = tl.where(x_id + 2 >= G, 2 * G - 1 - (x_id + 2), x_id + 2)
+
+    ym1 = tl.where(y_id - 1 < 0, -1 - (y_id - 1), y_id - 1)
+    yp1 = tl.where(y_id + 1 >= G, 2 * G - 1 - (y_id + 1), y_id + 1)
+    ym2 = tl.where(y_id - 2 < 0, -1 - (y_id - 2), y_id - 2)
+    yp2 = tl.where(y_id + 2 >= G, 2 * G - 1 - (y_id + 2), y_id + 2)
+
+    zm1 = tl.where(offs_z - 1 < 0, -1 - (offs_z - 1), offs_z - 1)
+    zp1 = tl.where(offs_z + 1 >= G, 2 * G - 1 - (offs_z + 1), offs_z + 1)
+    zm2 = tl.where(offs_z - 2 < 0, -1 - (offs_z - 2), offs_z - 2)
+    zp2 = tl.where(offs_z + 2 >= G, 2 * G - 1 - (offs_z + 2), offs_z + 2)
+
+    c = tl.load(p_curr_ptr + (x_id * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    pm = tl.load(p_prev_ptr + (x_id * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    # 6 face neighbors (1,0,0)
+    pxp = tl.load(p_curr_ptr + (xp1 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    pxm = tl.load(p_curr_ptr + (xm1 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+    pyp = tl.load(p_curr_ptr + (x_id * G + yp1) * G + offs_z, mask=mask, other=0.0)
+    pym = tl.load(p_curr_ptr + (x_id * G + ym1) * G + offs_z, mask=mask, other=0.0)
+    pzp = tl.load(p_curr_ptr + (x_id * G + y_id) * G + zp1, mask=mask, other=0.0)
+    pzm = tl.load(p_curr_ptr + (x_id * G + y_id) * G + zm1, mask=mask, other=0.0)
+    s_face = pxp + pxm + pyp + pym + pzp + pzm
+
+    # 6 axial-2 neighbors (2,0,0)
+    s_ax2 = (
+        tl.load(p_curr_ptr + (xp2 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm2 * G + y_id) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + yp2) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + ym2) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zp2, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + y_id) * G + zm2, mask=mask, other=0.0)
+    )
+
+    # 12 edge neighbors (1,1,0)
+    s_edge = (
+        tl.load(p_curr_ptr + (xp1 * G + yp1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xp1 * G + ym1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm1 * G + yp1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm1 * G + ym1) * G + offs_z, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xp1 * G + y_id) * G + zp1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xp1 * G + y_id) * G + zm1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm1 * G + y_id) * G + zp1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (xm1 * G + y_id) * G + zm1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + yp1) * G + zp1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + yp1) * G + zm1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + ym1) * G + zp1, mask=mask, other=0.0)
+        + tl.load(p_curr_ptr + (x_id * G + ym1) * G + zm1, mask=mask, other=0.0)
+    )
+    pn = w0 * c + w_face * s_face + w_ax2 * s_ax2 + w_edge * s_edge - pm
+    tl.store(p_next_ptr + (x_id * G + y_id) * G + offs_z, pn, mask=mask)
 
 
-@triton.jit
-def sym_conv1d_x_accum_kernel(inp_ptr, acc_ptr, w_ptr, L_val, G: tl.constexpr, INIT_ACC: tl.constexpr, BLOCK_YZ: tl.constexpr):
-    x_id = tl.program_id(0)
-    yz_blk = tl.program_id(1)
-    offs_yz = yz_blk * BLOCK_YZ + tl.arange(0, BLOCK_YZ)
-    mask = offs_yz < (G * G)
-    stride_x = G * G
-    w0 = tl.load(w_ptr + 0).to(tl.float32)
-    val = tl.load(inp_ptr + x_id * stride_x + offs_yz, mask=mask, other=0.0).to(tl.float32) * w0
-    for m in range(1, L_val + 1):
-        wm = tl.load(w_ptr + m).to(tl.float32)
-        xp = x_id + m
-        xp_ref = tl.where(xp >= G, 2 * G - 1 - xp, xp)
-        xm = x_id - m
-        xm_ref = tl.where(xm < 0, -1 - xm, xm)
-        vp = tl.load(inp_ptr + xp_ref * stride_x + offs_yz, mask=mask, other=0.0).to(tl.float32)
-        vm = tl.load(inp_ptr + xm_ref * stride_x + offs_yz, mask=mask, other=0.0).to(tl.float32)
-        val += wm * (vp + vm)
-    if INIT_ACC:
-        tl.store(acc_ptr + x_id * stride_x + offs_yz, val, mask=mask)
-    else:
-        prev = tl.load(acc_ptr + x_id * stride_x + offs_yz, mask=mask, other=0.0).to(tl.float32)
-        tl.store(acc_ptr + x_id * stride_x + offs_yz, prev + val, mask=mask)
-
-
-@triton.jit
-def leapfrog_finish_kernel(p_curr_ptr, p_prev_ptr, acc_ptr, p_next_ptr, alpha0, n_el, BLOCK: tl.constexpr):
-    pid = tl.program_id(0)
-    offs = pid * BLOCK + tl.arange(0, BLOCK)
-    mask = offs < n_el
-    pc = tl.load(p_curr_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-    pp = tl.load(p_prev_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-    ac = tl.load(acc_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-    tl.store(p_next_ptr + offs, alpha0 * pc + ac - pp, mask=mask)
-
-
-def step_separable_triton(p_curr, p_prev, p_next, buf1, buf2, acc, gpu_factors, alpha0: float, G: int, L: int):
-    grid_z = (G * G, triton.cdiv(G, 256))
-    grid_y = (G, triton.cdiv(G, 16), triton.cdiv(G, 64))
-    grid_x = (G, triton.cdiv(G * G, 512))
-    for r, (wx, wy, wz) in enumerate(gpu_factors):
-        sym_conv1d_z_kernel[grid_z](p_curr, buf1, wz, L, G=G, BLOCK_Z=256)
-        sym_conv1d_y_kernel[grid_y](buf1, buf2, wy, L, G=G, BLOCK_Z=64, BLOCK_Y=16)
-        sym_conv1d_x_accum_kernel[grid_x](buf2, acc, wx, L, G=G, INIT_ACC=(r == 0), BLOCK_YZ=512)
-    n_el = G * G * G
-    leapfrog_finish_kernel[(triton.cdiv(n_el, 1024),)](p_curr, p_prev, acc, p_next, alpha0, n_el, BLOCK=1024)
+def kspace_multiplier64(G: int, nu: float, device) -> torch.Tensor:
+    """Exact leapfrog multiplier 2 cos(nu |k|) on the rfftn half spectrum of a periodic G^3 grid (float64)."""
+    kf_full = 2.0 * math.pi * torch.fft.fftfreq(G, device=device, dtype=torch.float64)
+    kf_r = 2.0 * math.pi * torch.fft.rfftfreq(G, device=device, dtype=torch.float64)
+    kx_g, ky_g, kz_g = torch.meshgrid(kf_full, kf_full, kf_r, indexing="ij")
+    return 2.0 * torch.cos(nu * torch.sqrt(kx_g**2 + ky_g**2 + kz_g**2))
 
 
 def exact_spherical_pulse_3d(r: np.ndarray, ct: float, sigma0: float = 1.40) -> np.ndarray:
@@ -738,8 +781,10 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
 
     sim_cases = [
         {"name": "7-pt FDTD (nu=1/sqrt3)", "kind": "fdtd7", "nu": 1.0 / math.sqrt(3.0), "inter": torch.float32},
+        {"name": "13-pt O(dx^4,dt^2) FDTD (nu=0.50)", "kind": "fdtd13", "nu": 0.50, "inter": torch.float32},
         {"name": "27-pt IWB (nu=0.75)", "kind": "iwb27", "nu": 0.75, "inter": torch.float32},
         {"name": "27-pt IWB (nu=1.00)", "kind": "iwb27", "nu": 1.00, "inter": torch.float32},
+        {"name": "25-pt O(dx^4,dt^4) FDTD (nu=1/sqrt3)", "kind": "fdtd25", "nu": 1.0 / math.sqrt(3.0), "inter": torch.float32},
         {"name": "k-space cuFFT (periodic, nu=1.00)", "kind": "kspace", "nu": 1.00, "inter": torch.float32},
     ]
     for prop in propagators:
@@ -762,23 +807,19 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
 
         if case["kind"] == "sep":
             prop = case["prop"]
-            L = prop["L"]
-            alpha0 = prop["alpha0"]
-            gpu_facs = [
-                tuple(torch.tensor(f, device=device, dtype=torch.float32) for f in tup)
-                for tup in prop["factors_exact"]
-            ]
-            buf1 = torch.empty((G, G, G), device=device, dtype=case["inter"])
-            buf2 = torch.empty((G, G, G), device=device, dtype=case["inter"])
-            acc = torch.empty((G, G, G), device=device, dtype=torch.float32)
+            sep_step = gk.SeparableStep3D(prop["factors_exact"], prop["alpha0"], G, case["inter"])
+
+        elif case["kind"] == "fdtd25":
+            c1_25 = (8.0 / 3.0) * (nu**2) - 2.0 * (nu**4)
+            c2_25 = ((nu**4) - (nu**2)) / 6.0
+            c11_25 = (2.0 / 3.0) * (nu**4)
+            w0_25 = 2.0 - 3.0 * (c1_25 + c2_25 + c11_25)
+            wf_25 = 0.5 * c1_25
+            wa_25 = 0.5 * c2_25
+            we_25 = 0.25 * c11_25
 
         elif case["kind"] == "kspace":
-            kf_full = 2.0 * math.pi * torch.fft.fftfreq(G, device=device, dtype=torch.float64)
-            kf_r = 2.0 * math.pi * torch.fft.rfftfreq(G, device=device, dtype=torch.float64)
-            kx_g, ky_g, kz_g = torch.meshgrid(kf_full, kf_full, kf_r, indexing="ij")
-            kmag_g = torch.sqrt(kx_g**2 + ky_g**2 + kz_g**2)
-            m_hat_exact = (2.0 * torch.cos(nu * kmag_g)).to(torch.float32)
-            del kx_g, ky_g, kz_g, kmag_g
+            kspace_step = gk.KSpaceStep3D(kspace_multiplier64(G, nu, device))
 
         traces = {k: [float(p0_np[c_idx + dx, c_idx + dy, c_idx + dz]), float(p1_np[c_idx + dx, c_idx + dy, c_idx + dz])]
                   for k, (dx, dy, dz) in rec_offsets.items()}
@@ -791,12 +832,16 @@ def run_3d_spherical_wave_experiment(propagators, G: int = 256, ct_max: float = 
         for step in range(2, n_steps + 1):
             if case["kind"] == "fdtd7":
                 fdtd7_triton_kernel[grid_2d](p_curr, p_prev, p_next, nu**2, G=G, BLOCK_Z=256)
+            elif case["kind"] == "fdtd13":
+                fdtd13_o4_triton_kernel[grid_2d](p_curr, p_prev, p_next, nu**2, G=G, BLOCK_Z=256)
+            elif case["kind"] == "fdtd25":
+                fdtd25_o4_triton_kernel[grid_2d](p_curr, p_prev, p_next, w0_25, wf_25, wa_25, we_25, G=G, BLOCK_Z=256)
             elif case["kind"] == "iwb27":
                 iwb27_triton_kernel[grid_2d](p_curr, p_prev, p_next, nu**2, G=G, BLOCK_Z=256)
             elif case["kind"] == "kspace":
-                p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat_exact, s=(G, G, G)) - p_prev)
+                kspace_step(p_curr, p_prev, p_next)
             else:
-                step_separable_triton(p_curr, p_prev, p_next, buf1, buf2, acc, gpu_facs, alpha0, G, L)
+                sep_step(p_curr, p_prev, p_next)
 
             p_prev, p_curr, p_next = p_curr, p_next, p_prev
             ct_times.append(step * nu)
@@ -847,36 +892,31 @@ def verify_rigid_room_long_time_stability(prop, G_room: int = 64, n_steps: int =
     and conserved to floating-point precision!
     """
     device = torch.device("cuda")
-    L = prop["L"]
-    alpha0 = prop["alpha0"]
-    gpu_facs = [tuple(torch.tensor(f, device=device, dtype=torch.float32) for f in tup) for tup in prop["factors_exact"]]
+    step = gk.SeparableStep3D(prop["factors_exact"], prop["alpha0"], G_room)
 
     # Off-center Gaussian initial condition in rigid room [0, 64)^3 -> excites all 3-D room modes!
     coords = torch.arange(G_room, device=device, dtype=torch.float32)
     xx, yy, zz = torch.meshgrid(coords, coords, coords, indexing="ij")
     r2 = (xx - 21.3) ** 2 + (yy - 29.7) ** 2 + (zz - 18.4) ** 2
     p_prev = torch.exp(-0.25 * r2)
-    buf1 = torch.empty_like(p_prev)
-    buf2 = torch.empty_like(p_prev)
-    acc = torch.empty_like(p_prev)
     p_curr = torch.empty_like(p_prev)
     p_next = torch.empty_like(p_prev)
 
     # Symmetric first step for dp/dt(0) = 0: p^1 = 0.5 * (M * p^0)
-    step_separable_triton(p_prev, torch.zeros_like(p_prev), p_curr, buf1, buf2, acc, gpu_facs, alpha0, G_room, L)
+    step(p_prev, torch.zeros_like(p_prev), p_curr)
     p_curr = 0.5 * p_curr
 
     def discrete_energy(pc, pp):
-        # Apply M * pp via step_separable_triton with zero prev -> M_pp
+        # Apply M * pp via one step with zero prev -> M_pp
         M_pp = torch.empty_like(pc)
-        step_separable_triton(pp, torch.zeros_like(pp), M_pp, buf1, buf2, acc, gpu_facs, alpha0, G_room, L)
+        step(pp, torch.zeros_like(pp), M_pp)
         diff_norm2 = torch.sum((pc - pp) ** 2).item()
         pot = torch.sum(pc * (2.0 * pp - M_pp)).item()
         return diff_norm2 + pot
 
     e_init = discrete_energy(p_curr, p_prev)
     for _ in range(2, n_steps + 1):
-        step_separable_triton(p_curr, p_prev, p_next, buf1, buf2, acc, gpu_facs, alpha0, G_room, L)
+        step(p_curr, p_prev, p_next)
         p_prev, p_curr, p_next = p_curr, p_next, p_prev
     e_final = discrete_energy(p_curr, p_prev)
     rel_drift = abs(e_final - e_init) / abs(e_init)
@@ -885,57 +925,115 @@ def verify_rigid_room_long_time_stability(prop, G_room: int = 64, n_steps: int =
     return {"e_init": e_init, "e_final": e_final, "rel_drift": rel_drift}
 
 
+def reference_step64(p_curr64, p_prev64, factors, alpha0: float):
+    """
+    float64 leapfrog step p_next = alpha0 p + sum_n (fx_n (x) fy_n (x) fz_n) * p - p_prev with half-sample
+    reflecting (Neumann) walls, evaluated as plain index-shifted sums on the GPU.
+    """
+    G = p_curr64.shape[0]
+    L = len(factors[0][0]) - 1
+    idx = torch.arange(-L, G + L, device=p_curr64.device)
+    idx = torch.where(idx < 0, -1 - idx, idx)
+    idx = torch.where(idx >= G, 2 * G - 1 - idx, idx)
+
+    def fir(u, half, axis):
+        out = torch.zeros_like(u)
+        for m in range(-L, L + 1):
+            out += float(half[abs(m)]) * u.index_select(axis, idx[L + m: L + m + G])
+        return out
+
+    acc = alpha0 * p_curr64 - p_prev64
+    for fx, fy, fz in factors:
+        acc += fir(fir(fir(p_curr64, fz, 2), fy, 1), fx, 0)
+    return acc
+
+
+GPU_BENCHMARK_INFO = {
+    "fields": "256^3 float32 p_curr and p_prev with independent uniform [-0.5, 0.5) samples (torch.Generator seed 0)",
+    "errors": "err_max_* and err_rms_* are absolute errors of one leapfrog step against the same step in float64: "
+              "separable and direct steps against shifted sums with half-sample reflecting walls, the k-space step "
+              "against float64 rfftn/irfftn; the single-pass FDTD kernels are unchanged and not re-validated here",
+    "timing": "mean and standard deviation in ms per step over 10 CUDA-Event batches (direct: 6 batches); "
+              "launch parameters (config_*) are tuned by timing at start-up, and means differed by up to 3% "
+              "between two complete runs, more than the within-run standard deviations",
+    "direct": "Triton dense W^3 stencil step on a z-padded copy of p_curr, four x-planes per program",
+    "kspace": "periodic cuFFT step split into L2-resident chunks (2-D real transforms per group of x-planes; x "
+              "transform, spectral multiply and inverse x transform per group of y-rows)",
+    "sep": "Triton x fan-out, y, and z fan-in + update passes over L2-resident slabs; fp16 stores the two slab "
+           "intermediates in float16 (fields and accumulation stay float32)",
+}
+
+
 def benchmark_3d_gpu(propagators, G: int = 256):
-    """Benchmark 256^3 step times on RTX 4070 Ti Super across FDTD baselines, direct conv3d, naive, and exact."""
+    """
+    Benchmark 256^3 step times on RTX 4070 Ti Super (10 CUDA-Event batches: mean +/- std) and measure the
+    single-step error of the k-space, direct and separable steps against float64 (see GPU_BENCHMARK_INFO).
+    """
     device = torch.device("cuda")
-    p_curr = torch.randn((G, G, G), device=device, dtype=torch.float32)
-    p_prev = torch.randn((G, G, G), device=device, dtype=torch.float32)
+    gen = torch.Generator().manual_seed(0)
+    p_curr64 = (torch.rand((G, G, G), generator=gen, dtype=torch.float64) - 0.5).to(device)
+    p_prev64 = (torch.rand((G, G, G), generator=gen, dtype=torch.float64) - 0.5).to(device)
+    p_curr = p_curr64.to(torch.float32)
+    p_prev = p_prev64.to(torch.float32)
     p_next = torch.empty_like(p_curr)
-    acc = torch.empty_like(p_curr)
     grid_2d = (G * G, triton.cdiv(G, 256))
 
     bench = []
 
     # 1. 7-pt FDTD
-    for _ in range(10):
-        fdtd7_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0 / 3.0, G=G, BLOCK_Z=256)
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(100):
-        fdtd7_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0 / 3.0, G=G, BLOCK_Z=256)
-    torch.cuda.synchronize()
-    ms7 = 1000.0 * (time.perf_counter() - t0) / 100.0
-    bench.append({"name": "7-pt FDTD (1-pass Triton)", "W": 3, "rank": None, "ms_fp32": ms7, "gvox_fp32": (G**3 / 1e9) / (ms7 / 1000.0)})
-    print(f"Bench 256^3 7-pt FDTD (1-pass Triton): {ms7:.3f} ms/step ({(G**3/1e9)/(ms7/1000.0):.2f} GVox/s)")
+    ms7, std7 = gk.cuda_batch_stats(
+        lambda: fdtd7_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0 / 3.0, G=G, BLOCK_Z=256),
+        warmup=10, n_batches=10, iters_per_batch=20,
+    )
+    bench.append({"name": "7-pt FDTD (1-pass Triton)", "W": 3, "rank": None, "ms_fp32": ms7, "ms_fp32_std": std7, "gvox_fp32": (G**3 / 1e9) / (ms7 / 1000.0)})
+    print(f"Bench 256^3 7-pt FDTD (1-pass Triton): {ms7:.3f}+/-{std7:.3f} ms/step ({(G**3/1e9)/(ms7/1000.0):.2f} GVox/s)")
 
-    # 2. 27-pt IWB FDTD (dedicated 1-pass Triton!)
-    for _ in range(10):
-        iwb27_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0, G=G, BLOCK_Z=256)
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(100):
-        iwb27_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0, G=G, BLOCK_Z=256)
-    torch.cuda.synchronize()
-    ms27 = 1000.0 * (time.perf_counter() - t0) / 100.0
-    bench.append({"name": "27-pt IWB (1-pass Triton)", "W": 3, "rank": 1, "ms_fp32": ms27, "gvox_fp32": (G**3 / 1e9) / (ms27 / 1000.0)})
-    print(f"Bench 256^3 27-pt IWB (1-pass Triton): {ms27:.3f} ms/step ({(G**3/1e9)/(ms27/1000.0):.2f} GVox/s)")
+    # 1b. 13-pt O(dx^4, dt^2) axial FDTD
+    ms13, std13 = gk.cuda_batch_stats(
+        lambda: fdtd13_o4_triton_kernel[grid_2d](p_curr, p_prev, p_next, 0.25, G=G, BLOCK_Z=256),
+        warmup=10, n_batches=10, iters_per_batch=20,
+    )
+    bench.append({"name": "13-pt O(dx^4,dt^2) FDTD (1-pass Triton)", "W": 5, "rank": None, "ms_fp32": ms13, "ms_fp32_std": std13, "gvox_fp32": (G**3 / 1e9) / (ms13 / 1000.0)})
+    print(f"Bench 256^3 13-pt O(dx^4,dt^2) (1-pass Triton): {ms13:.3f}+/-{std13:.3f} ms/step ({(G**3/1e9)/(ms13/1000.0):.2f} GVox/s)")
 
-    # 2b. Periodic k-space pseudospectral baseline (torch.fft.rfftn / irfftn writing into p_next)
-    m_hat3 = torch.randn((G, G, G // 2 + 1), device=device, dtype=torch.float32)
-    for _ in range(15):
-        p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat3, s=(G, G, G)) - p_prev)
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(80):
-        p_next.copy_(torch.fft.irfftn(torch.fft.rfftn(p_curr) * m_hat3, s=(G, G, G)) - p_prev)
-    torch.cuda.synchronize()
-    ms_kspace = 1000.0 * (time.perf_counter() - t0) / 80.0
-    bench.append({"name": "k-space rfftn/irfftn (periodic cuFFT)", "W": G, "rank": None, "ms_fp32": ms_kspace, "gvox_fp32": (G**3 / 1e9) / (ms_kspace / 1000.0)})
-    print(f"Bench 256^3 k-space rfftn/irfftn (periodic cuFFT): {ms_kspace:.3f} ms/step ({(G**3/1e9)/(ms_kspace/1000.0):.2f} GVox/s)")
+    # 2. 27-pt IWB FDTD (dedicated 1-pass Triton)
+    ms27, std27 = gk.cuda_batch_stats(
+        lambda: iwb27_triton_kernel[grid_2d](p_curr, p_prev, p_next, 1.0, G=G, BLOCK_Z=256),
+        warmup=10, n_batches=10, iters_per_batch=20,
+    )
+    bench.append({"name": "27-pt IWB (1-pass Triton)", "W": 3, "rank": 1, "ms_fp32": ms27, "ms_fp32_std": std27, "gvox_fp32": (G**3 / 1e9) / (ms27 / 1000.0)})
+    print(f"Bench 256^3 27-pt IWB (1-pass Triton): {ms27:.3f}+/-{std27:.3f} ms/step ({(G**3/1e9)/(ms27/1000.0):.2f} GVox/s)")
 
-    # 3. Direct W^3 conv3d vs Naive vs Exact Triton (fp32 & fp16-inter) for each unique (L, rank_exact, rank_naive)
+    # 2a. 25-pt O(dx^4, dt^4) compact explicit FDTD (Hamilton & Bilbao 2016)
+    nu25 = 1.0 / math.sqrt(3.0)
+    c1_25 = (8.0 / 3.0) * (nu25**2) - 2.0 * (nu25**4)
+    c2_25 = ((nu25**4) - (nu25**2)) / 6.0
+    c11_25 = (2.0 / 3.0) * (nu25**4)
+    w0_25 = 2.0 - 3.0 * (c1_25 + c2_25 + c11_25)
+    ms25, std25 = gk.cuda_batch_stats(
+        lambda: fdtd25_o4_triton_kernel[grid_2d](p_curr, p_prev, p_next, w0_25, 0.5 * c1_25, 0.5 * c2_25, 0.25 * c11_25, G=G, BLOCK_Z=256),
+        warmup=10, n_batches=10, iters_per_batch=20,
+    )
+    bench.append({"name": "25-pt O(dx^4,dt^4) FDTD (1-pass Triton)", "W": 5, "rank": None, "ms_fp32": ms25, "ms_fp32_std": std25, "gvox_fp32": (G**3 / 1e9) / (ms25 / 1000.0)})
+    print(f"Bench 256^3 25-pt O(dx^4,dt^4) (1-pass Triton): {ms25:.3f}+/-{std25:.3f} ms/step ({(G**3/1e9)/(ms25/1000.0):.2f} GVox/s)")
+
+    # 2b. Periodic k-space pseudospectral baseline (exact nu = 1 multiplier, L2-chunked cuFFT)
+    m_hat64 = kspace_multiplier64(G, 1.0, device)
+    ref_k = torch.fft.irfftn(torch.fft.rfftn(p_curr64) * m_hat64, s=(G, G, G)) - p_prev64
+    kstep = gk.KSpaceStep3D.tuned(m_hat64, p_curr, p_prev, p_next)
+    p_next.zero_()
+    ms_kspace, std_kspace = gk.cuda_batch_stats(lambda: kstep(p_curr, p_prev, p_next), warmup=10, n_batches=10, iters_per_batch=12)
+    e_max, e_rms = gk.max_rms_error(p_next, ref_k)
+    assert e_max < 2e-5, f"k-space step error {e_max}"
+    bench.append({
+        "name": "k-space cuFFT (periodic, L2-chunked)", "W": G, "rank": None, "ms_fp32": ms_kspace, "ms_fp32_std": std_kspace,
+        "gvox_fp32": (G**3 / 1e9) / (ms_kspace / 1000.0), "err_max_fp32": e_max, "err_rms_fp32": e_rms, "config": kstep.config,
+    })
+    print(f"Bench 256^3 k-space cuFFT (periodic, L2-chunked): {ms_kspace:.3f}+/-{std_kspace:.3f} ms/step ({(G**3/1e9)/(ms_kspace/1000.0):.2f} GVox/s, err {e_max:.1e})")
+    del kstep, ref_k, m_hat64
+
+    # 3. Direct W^3 stencil vs Naive vs Exact separable (fp32 & fp16-inter) for each unique (L, rank_exact, rank_naive)
     seen = set()
-    p5 = p_curr[None, None]
     for prop in propagators:
         key = (prop["L"], prop["rank_exact"], prop["rank_naive"])
         if key in seen:
@@ -943,62 +1041,104 @@ def benchmark_3d_gpu(propagators, G: int = 256):
         seen.add(key)
         L = prop["L"]
         W = prop["W"]
+        alpha0 = prop["alpha0"]
+        if "factors_naive" in prop:
+            raw_ex, raw_nv = prop["factors_exact"], prop["factors_naive"]
+        else:
+            raw_ex, raw_nv = build_3d_separable_factors(L, prop["components"])
+        ref = reference_step64(p_curr64, p_prev64, raw_ex, alpha0)
 
-        # Direct W^3 conv3d
-        k3d = torch.randn((1, 1, W, W, W), device=device, dtype=torch.float32)
-        for _ in range(2):
-            F.conv3d(F.pad(p5, (L,) * 6, mode="replicate"), k3d)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        n_dir = 4 if W <= 13 else 3
-        for _ in range(n_dir):
-            F.conv3d(F.pad(p5, (L,) * 6, mode="replicate"), k3d)
-        torch.cuda.synchronize()
-        ms_dir = 1000.0 * (time.perf_counter() - t0) / n_dir
+        row = {"label": prop["label"], "L": L, "W": W, "rank_exact": prop["rank_exact"], "rank_naive": prop["rank_naive"]}
 
-        fac_ex = [tuple(torch.tensor(f, device=device, dtype=torch.float32) for f in tup) for tup in prop["factors_exact"]]
-        fac_nv = [tuple(torch.tensor(f, device=device, dtype=torch.float32) for f in tup) for tup in prop["factors_naive"]]
+        def measure(step, name, batches, iters, reference, tol):
+            p_next.zero_()
+            ms, std = gk.cuda_batch_stats(lambda: step(p_curr, p_prev, p_next), warmup=4, n_batches=batches, iters_per_batch=iters)
+            e_max, e_rms = gk.max_rms_error(p_next, reference)
+            assert e_max < tol, f"{name} step error {e_max} for {prop['label']}"
+            row.update({f"ms_{name}": ms, f"ms_{name}_std": std, f"err_max_{name}": e_max, f"err_rms_{name}": e_rms,
+                        f"config_{name}": step.config})
 
-        b32_1 = torch.empty((G, G, G), device=device, dtype=torch.float32)
-        b32_2 = torch.empty((G, G, G), device=device, dtype=torch.float32)
-        b16_1 = torch.empty((G, G, G), device=device, dtype=torch.float16)
-        b16_2 = torch.empty((G, G, G), device=device, dtype=torch.float16)
-
-        def time_triton(facs, b1, b2):
-            for _ in range(6):
-                step_separable_triton(p_curr, p_prev, p_next, b1, b2, acc, facs, prop["alpha0"], G, L)
-            torch.cuda.synchronize()
-            t_s = time.perf_counter()
-            iters = 40
-            for _ in range(iters):
-                step_separable_triton(p_curr, p_prev, p_next, b1, b2, acc, facs, prop["alpha0"], G, L)
-            torch.cuda.synchronize()
-            return 1000.0 * (time.perf_counter() - t_s) / iters
-
-        ms_nv32 = time_triton(fac_nv, b32_1, b32_2)
-        ms_ex32 = time_triton(fac_ex, b32_1, b32_2)
-        ms_ex16 = time_triton(fac_ex, b16_1, b16_2)
-
-        row = {
-            "label": prop["label"],
-            "L": L,
-            "W": W,
-            "rank_exact": prop["rank_exact"],
-            "rank_naive": prop["rank_naive"],
-            "ms_direct_fp32": ms_dir,
-            "ms_naive_fp32": ms_nv32,
-            "ms_exact_fp32": ms_ex32,
-            "ms_exact_fp16": ms_ex16,
-            "gvox_exact_fp32": (G**3 / 1e9) / (ms_ex32 / 1000.0),
-            "gvox_exact_fp16": (G**3 / 1e9) / (ms_ex16 / 1000.0),
-        }
+        idx_full = np.abs(np.arange(-L, L + 1))
+        stencil = sum(np.einsum("i,j,k->ijk", fx[idx_full], fy[idx_full], fz[idx_full]) for fx, fy, fz in raw_ex)
+        stencil[L, L, L] += alpha0
+        measure(gk.DirectStep3D.tuned(stencil, p_curr, p_prev, p_next), "direct_fp32", 6, 4, ref, 5e-5)
+        measure(gk.SeparableStep3D.tuned(raw_nv, alpha0, p_curr, p_prev, p_next), "naive_fp32", 10, 8,
+                reference_step64(p_curr64, p_prev64, raw_nv, alpha0), 2e-5)
+        measure(gk.SeparableStep3D.tuned(raw_ex, alpha0, p_curr, p_prev, p_next), "exact_fp32", 10, 8, ref, 2e-5)
+        measure(gk.SeparableStep3D.tuned(raw_ex, alpha0, p_curr, p_prev, p_next, torch.float16), "exact_fp16", 10, 8, ref, 2e-2)
+        row["gvox_exact_fp32"] = (G**3 / 1e9) / (row["ms_exact_fp32"] / 1000.0)
+        row["gvox_exact_fp16"] = (G**3 / 1e9) / (row["ms_exact_fp16"] / 1000.0)
         bench.append(row)
         print(
             f"Bench 256^3 W={W:2d} (R={prop['rank_exact']} vs naive {prop['rank_naive']}): "
-            f"Direct={ms_dir:6.2f} ms | Naive fp32={ms_nv32:5.2f} ms | "
-            f"Exact fp32={ms_ex32:5.2f} ms ({ms_dir/ms_ex32:.1f}x) | Exact fp16={ms_ex16:5.2f} ms ({ms_dir/ms_ex16:.1f}x)"
+            f"Direct={row['ms_direct_fp32']:6.2f}+/-{row['ms_direct_fp32_std']:.2f} ms (err {row['err_max_direct_fp32']:.1e}) | "
+            f"Naive={row['ms_naive_fp32']:5.2f}+/-{row['ms_naive_fp32_std']:.3f} ms (err {row['err_max_naive_fp32']:.1e}) | "
+            f"Exact fp32={row['ms_exact_fp32']:5.2f}+/-{row['ms_exact_fp32_std']:.3f} ms (err {row['err_max_exact_fp32']:.1e}) | "
+            f"Exact fp16={row['ms_exact_fp16']:5.2f}+/-{row['ms_exact_fp16_std']:.3f} ms (err {row['err_max_exact_fp16']:.1e})"
         )
     return bench
+
+
+def benchmark_3d_cpu(G: int = 128, L: int = 6, R: int = 7):
+    """Multi-core CPU reference timings on 128^3 voxels (Intel Core Ultra 5 125H, float32, 4 runs: mean +/- std)."""
+    W = 2 * L + 1
+    p_c = torch.randn((1, 1, G, G, G), dtype=torch.float32)
+    p_p = torch.randn((1, 1, G, G, G), dtype=torch.float32)
+    m_hat = torch.randn((G, G, G // 2 + 1), dtype=torch.float32)
+
+    def _stats(fn, n_runs: int = 4):
+        fn()
+        ts = []
+        for _ in range(n_runs):
+            t0 = time.perf_counter()
+            fn()
+            ts.append(1000.0 * (time.perf_counter() - t0))
+        arr = np.array(ts, dtype=np.float64)
+        return float(np.mean(arr)), float(np.std(arr, ddof=1))
+
+    # 1. k-space periodic rfftn/irfftn
+    ms_fft, std_fft = _stats(lambda: torch.fft.irfftn(torch.fft.rfftn(p_c[0, 0]) * m_hat, s=(G, G, G)) - p_p[0, 0])
+
+    # 2. Separable R=7 1-D conv3d cascade vs naive R=9
+    kx = [torch.randn((1, 1, W, 1, 1), dtype=torch.float32) for _ in range(9)]
+    ky = [torch.randn((1, 1, 1, W, 1), dtype=torch.float32) for _ in range(9)]
+    kz = [torch.randn((1, 1, 1, 1, W), dtype=torch.float32) for _ in range(9)]
+
+    def _run_sep(n_terms):
+        acc = None
+        for r in range(n_terms):
+            u = F.conv3d(F.pad(p_c, (L, L, 0, 0, 0, 0), mode="replicate"), kz[r])
+            v = F.conv3d(F.pad(u, (0, 0, L, L, 0, 0), mode="replicate"), ky[r])
+            w = F.conv3d(F.pad(v, (0, 0, 0, 0, L, L), mode="replicate"), kx[r])
+            acc = w if acc is None else (acc + w)
+        return acc - p_p
+
+    ms_sep7, std_sep7 = _stats(lambda: _run_sep(R))
+    ms_sep9, std_sep9 = _stats(lambda: _run_sep(9))
+
+    # 3. Direct 13^3 conv3d (1 warmup + 2 timed runs because 13^3 on 128^3 CPU is ~O(seconds))
+    k3d = torch.randn((1, 1, W, W, W), dtype=torch.float32)
+    ms_dir, std_dir = _stats(lambda: F.conv3d(F.pad(p_c, (L,) * 6, mode="replicate"), k3d) - p_p, n_runs=2)
+    # Also measure 256^3 k-space FFT on CPU (DRAM-resident, direct comparison with 256^3 GPU!)
+    p256 = torch.randn((256, 256, 256), dtype=torch.float32)
+    q256 = torch.randn((256, 256, 256), dtype=torch.float32)
+    m256 = torch.randn((256, 256, 129), dtype=torch.float32)
+    ms_fft256, std_fft256 = _stats(lambda: torch.fft.irfftn(torch.fft.rfftn(p256) * m256, s=(256, 256, 256)) - q256, n_runs=4)
+
+    out = {
+        "grid": G,
+        "W": W,
+        "ms_kspace_fp32": ms_fft, "ms_kspace_fp32_std": std_fft,
+        "ms_kspace_256cubed_fp32": ms_fft256, "ms_kspace_256cubed_fp32_std": std_fft256,
+        "ms_sep_R7_fp32": ms_sep7, "ms_sep_R7_fp32_std": std_sep7,
+        "ms_sep_R9_naive_fp32": ms_sep9, "ms_sep_R9_naive_fp32_std": std_sep9,
+        "ms_direct_13cubed_fp32": ms_dir, "ms_direct_13cubed_fp32_std": std_dir,
+    }
+    print(
+        f"CPU {G}^3 (W={W}): k-space={ms_fft:.1f}+/-{std_fft:.1f} ms | "
+        f"Sep R=7={ms_sep7:.1f}+/-{std_sep7:.1f} ms (Naive R=9={ms_sep9:.1f} ms) | Direct {W}^3={ms_dir:.1f} ms"
+    )
+    return out
 
 
 def compute_dispersion_curves(propagators):
@@ -1015,6 +1155,7 @@ def compute_dispersion_curves(propagators):
     for bname, sch, nu in [
         ("7-pt FDTD (nu=1/sqrt3)", "fdtd_7pt", 1.0 / math.sqrt(3.0)),
         ("27-pt IWB (nu=1.00)", "iwb_27pt", 1.00),
+        ("25-pt O(dx^4,dt^4) FDTD (nu=1/sqrt3)", "fdtd_25pt_o4", 1.0 / math.sqrt(3.0)),
     ]:
         curves["models"][bname] = {}
         for dname, u in dirs.items():
@@ -1043,7 +1184,54 @@ def compute_dispersion_curves(propagators):
     return curves
 
 
+RESULTS_PATH = os.path.join(os.path.dirname(__file__), "results_acoustics_3d.json")
+
+
+def run_gpu_experiments(propagators):
+    """Wave simulation, rigid-room energy test and throughput benchmarks, keyed as in the results file."""
+    print("\n=== 3-D Broadband Spherical Wave Simulation on 256^3 Grid (RTX 4070 Ti Super) ===")
+    sim_results, snapshots = run_3d_spherical_wave_experiment(propagators, G=256, ct_max=72.0, sigma0=1.40)
+
+    print("\n=== 1,000-Step Rigid 3-D Room Neumann Wall Energy Conservation ===")
+    room_checks = {}
+    for prop in propagators:
+        if prop["label"] in {"Rank-7 (2c+1r, nu=0.75)", "Rank-7 (2c+1r, nu=1.00)", "Rank-7 (deg1 1c, nu=0.75)"}:
+            room_checks[prop["label"]] = verify_rigid_room_long_time_stability(prop, G_room=64, n_steps=1000)
+
+    print("\n=== Hardware-Fair RTX 4070 Ti Super 256^3 Throughput Benchmarks ===")
+    gpu_bench = benchmark_3d_gpu(propagators, G=256)
+    return {
+        "spherical_wave_sim": sim_results,
+        "snapshots_z0_ct48": snapshots,
+        "rigid_room_energy": room_checks,
+        "gpu_benchmark_256cubed": gpu_bench,
+        "gpu_benchmark_info": GPU_BENCHMARK_INFO,
+    }
+
+
+def rerun_gpu_experiments():
+    """Rerun only the GPU parts from the stored propagators and update the stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    propagators = []
+    for stored in results["propagators"]:
+        prop = dict(stored)
+        prop["factors_exact"], prop["factors_naive"] = build_3d_separable_factors(prop["L"], prop["components"])
+        for tup, tup_stored in zip(prop["factors_exact"], stored["factors_exact"]):
+            assert np.allclose(np.array(tup), np.array(tup_stored), rtol=1e-12, atol=1e-15), prop["label"]
+        propagators.append(prop)
+    results.update(run_gpu_experiments(propagators))
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated GPU results in {RESULTS_PATH}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU simulation, room test and benchmarks")
+    if parser.parse_args().gpu_only:
+        return rerun_gpu_experiments()
+
     verify_iwb_is_single_real_gaussian()
 
     K_oct, kmag_oct, _ = build_octant_grid(65, k_cut_frac=0.80)
@@ -1056,6 +1244,7 @@ def main():
         ("13-pt O(dx^4,dt^2) FDTD (nu=0.50)", "fdtd_13pt_o4", 0.50),
         ("27-pt IWB (nu=0.75)", "iwb_27pt", 0.75),
         ("27-pt IWB (nu=1.00)", "iwb_27pt", 1.00),
+        ("25-pt O(dx^4,dt^4) FDTD (nu=1/sqrt3)", "fdtd_25pt_o4", 1.0 / math.sqrt(3.0)),
     ]:
         eval_b = lambda K_q, s=sch, n=nu: evaluate_baseline_octant(s, n, K_q, np.linalg.norm(K_q, axis=1))
         M_b = evaluate_baseline_octant(sch, nu, K_oct, kmag_oct)
@@ -1084,17 +1273,8 @@ def main():
     ]
     propagators = [optimize_and_certify_propagator(lbl, L, st, nu, kc, K_oct, kmag_oct) for lbl, L, st, nu, kc in configs]
 
-    print("\n=== 3-D Broadband Spherical Wave Simulation on 256^3 Grid (RTX 4070 Ti Super) ===")
-    sim_results, snapshots = run_3d_spherical_wave_experiment(propagators, G=256, ct_max=72.0, sigma0=1.40)
-
-    print("\n=== 1,000-Step Rigid 3-D Room Neumann Wall Energy Conservation ===")
-    room_checks = {}
-    for prop in propagators:
-        if prop["label"] in {"Rank-7 (2c+1r, nu=0.75)", "Rank-7 (2c+1r, nu=1.00)", "Rank-7 (deg1 1c, nu=0.75)"}:
-            room_checks[prop["label"]] = verify_rigid_room_long_time_stability(prop, G_room=64, n_steps=1000)
-
-    print("\n=== Hardware-Fair RTX 4070 Ti Super 256^3 Throughput Benchmarks ===")
-    gpu_bench = benchmark_3d_gpu(propagators, G=256)
+    gpu_results = run_gpu_experiments(propagators)
+    cpu_bench = benchmark_3d_cpu(G=128, L=6, R=7)
     disp_curves = compute_dispersion_curves(propagators)
 
     # Strip numpy arrays inside factors for clean JSON serialization
@@ -1104,16 +1284,14 @@ def main():
         p_copy["factors_exact"] = [[f.tolist() for f in tup] for tup in p["factors_exact"]]
         serializable_props.append(p_copy)
 
-    out_path = os.path.join(os.path.dirname(__file__), "results_acoustics_3d.json")
+    out_path = RESULTS_PATH
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "baselines": baselines,
                 "propagators": serializable_props,
-                "spherical_wave_sim": sim_results,
-                "snapshots_z0_ct48": snapshots,
-                "rigid_room_energy": room_checks,
-                "gpu_benchmark_256cubed": gpu_bench,
+                **gpu_results,
+                "cpu_benchmark_128cubed": cpu_bench,
                 "dispersion_curves": disp_curves,
             },
             f,
