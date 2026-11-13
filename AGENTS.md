@@ -21,7 +21,7 @@
   proofs" below).
 - `Applications/`: reproducible Python/SciPy/PyTorch/Triton numerical optimization, simulation,
   and GPU benchmark scripts (`blur_2d.py`, `acoustics_3d.py`, `generate_figures.py`, JSON
-  results) accompanying Section 5 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
+  results) accompanying Section 6 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
   and all Matplotlib/`uv`/Triton caches inside `.tmp/`). `gpu_kernels.py` holds the GPU
   implementations (separable, direct, `cuFFT`) used by both scripts; see "GPU benchmarks" below.
   `--gpu-only` on either script reruns only its GPU parts from the stored optimization results.

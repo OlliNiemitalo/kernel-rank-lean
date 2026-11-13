@@ -52,7 +52,7 @@ benchmark row stores the maximum and root-mean-square error of each method again
   loaded row segment feeds several output rows or planes; the 3-D step reads a $z$-padded copy of the field so
   that no index reflection is needed in the inner loop.
 - **`cuFFT`** (`FFTBlur2D`, `KSpaceStep3D`). The 2-D blur packs channel pairs into complex planes (the kernel
-  is real, so one in-place complex transform filters two channels), centers the even kernel at the origin so
+  is real, so one complex 2-D transform with in-place real spectral multiply filters two channels), centers the even kernel at the origin so
   its spectrum is real, folds the normalization into it, and picks the fastest $7$-smooth period of at least
   the image size plus $L$ (zero padding) or $2L$ (clamped borders). The 3-D $k$-space step splits the
   transform into L2-resident chunks: 2-D real transforms per group of $x$-planes, then the $x$ transform,

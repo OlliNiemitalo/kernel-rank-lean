@@ -35,7 +35,7 @@ def make_overview_pipeline_figure(app_dir: str, paper_dir: str, preview_dir: str
     """
     Pedagogical Figure 1 (Section 1.1):
       (a) Mathematical "Components" view for 2c (N = 4): 1-D strips h(x) x v(y) -> 2-D outer products -> circular u_1, u_2 -> K.
-      (b) Computational "Rendering terms" view: orthogonalized rowSpan terms t_1..t_4 (smallest first, pass-group brackets) -> K.
+      (b) Computational "Rendering terms" view: orthogonalized rowSpan terms t_1..t_4 (smallest first) -> K.
       (c) Step-by-step 2-pass image convolution showing the single overwritten horizontal intermediate buffer m <- I *_x h_n,
           the vertical pass output m *_y v_n, and the running accumulator A_1 -> A_2 -> A_3 -> A_4 -> rendered bokeh output.
     """
@@ -661,8 +661,9 @@ def make_acoustics_3d_figure(app_dir: str, paper_dir: str, preview_dir: str | No
     dir_ls = {"axis": "-", "face": "--", "body": ":"}
     scheme_specs = [
         ("7-pt FDTD (nu=1/sqrt3)", "#d62728", r"7-pt FDTD ($\nu{=}1/\sqrt{3}$)"),
-        ("27-pt IWB (nu=1.00)", "#ff7f0e", r"27-pt IWB ($\nu{=}1, R{=}1$ real Gauss.)"),
-        ("Rank-7 (2c+1r, nu=1.00)", "#1f77b4", r"Rank-7 ($2c{+}1r, \nu{=}1.00, W{=}13$)"),
+        ("27-pt IWB (nu=1.00)", "#ff7f0e", r"27-pt IWB ($\nu{=}1, R{=}1$ Gauss.)"),
+        ("25-pt O(dx^4,dt^4) FDTD (nu=1/sqrt3)", "#8c564b", r"25-pt $O(\Delta x^4,\Delta t^4)$ ($\nu{=}1/\sqrt{3}$)"),
+        ("Rank-7 (2c+1r, nu=1.00)", "#1f77b4", r"Rank-7 ($2c{+}1r, \nu{=}1, W{=}13$)"),
     ]
     for mkey, col, mlbl in scheme_specs:
         for dkey, ls in dir_ls.items():
@@ -683,8 +684,8 @@ def make_acoustics_3d_figure(app_dir: str, paper_dir: str, preview_dir: str | No
     ax_disp.grid(True, alpha=0.25, lw=0.5)
     ax_disp.legend(loc="lower left", ncol=2, frameon=True, framealpha=0.93, fontsize=7.2)
 
-    # Inset zoom placed in the unobstructed lower-middle region above the legend!
-    ax_in = ax_disp.inset_axes([0.07, 0.31, 0.46, 0.45])
+    # Inset zoom placed cleanly above the 4-row legend!
+    ax_in = ax_disp.inset_axes([0.07, 0.355, 0.45, 0.415])
     ax_in.axhspan(-0.10, 0.10, color="#e8f4ea", alpha=0.85)
     for mkey, col, short in [
         ("Rank-7 (deg1 1c, nu=0.75)", "#9467bd", r"$R{=}7$ ($\deg 1, 1c$)"),

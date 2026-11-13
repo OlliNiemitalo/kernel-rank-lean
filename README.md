@@ -125,11 +125,12 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   `≤ 0.31 / 255` (`≤ 0.33 / 255` across all 18 families) while cutting linear-light highlight error
   by a further `1.5×`–`2.9×` over largest-first summation (with all three implementations tuned and
   checked against `float64` references in [`Applications/gpu_kernels.py`](Applications/gpu_kernels.py),
-  the `float16` cascade is `9.4×`–`29.6×` faster than direct `155 × 155` 2-D convolution at
-  `1920 × 1080` RGBA on an RTX 4070 Ti Super, and faster than `0.45–0.46 ms` clamp-padded `cuFFT`
-  only at `R = 4` for `R_px ≤ 16`, whereas `cuFFT` at `0.45–0.56 ms` is faster for purely
-  shift-invariant larger-radius or higher-rank FIR blurs), in contrast to `d ≥ 3` where minimal CP decompositions lack transitive
-  `GL_R(ℝ)` cross-component rotation freedom.
+  where dense direct and `cuFFT` runtimes depend only on `W`, the `float16` cascade on `2c/4c/6c` is
+  `9.4×`–`29.5×` faster than direct `155 × 155` 2-D convolution at `1920 × 1080` RGBA on an RTX 4070 Ti
+  Super, and faster than `0.45–0.46 ms` clamp-padded `cuFFT` only at `R = 4` for `R_px ≤ 16`, whereas
+  `cuFFT` at `0.45–0.56 ms` is faster for purely shift-invariant larger-radius or higher-rank FIR
+  blurs), in contrast to `d ≥ 3` where minimal CP decompositions lack transitive `GL_R(ℝ)`
+  cross-component rotation freedom.
 * **Isotropic low-pass filtering and steerable edge or orientation analysis.** An ideal 2-D
   circular low-pass filter `ω_c J₁(ω_c r) / (2π r)` removes pixel-grid diagonal bias, has infinite
   separable rank because of its algebraic radial decay, and can be approximated by complex-rate
