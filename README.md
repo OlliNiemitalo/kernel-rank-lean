@@ -166,8 +166,9 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   reduce worst-case 3-D directional phase-velocity error up to `0.80π` to `0.049%` (extending the
   `0.1%`-accurate bandwidth from `0.085π` for `27`-pt `IWB` and `0.236π` for fourth-order `25`-pt
   `O(Δx⁴, Δt⁴)` to `0.81π`—an analytical resolution-scaling reduction of `865×` in grid voxels and
-  `476×`–`660×` in compute time vs. `27`-pt `IWB`, or `40×` in voxels and `14×`–`19×` in compute
-  time vs. `25`-pt `O(Δx⁴, Δt⁴)` at equal `0.1%` dispersion accuracy, while `1`-pass compact FDTD
+  about `1,800×`–`2,400×` in compute time vs. `27`-pt `IWB`, or `40×` in voxels and `52×`–`71×`
+  in compute time vs. `25`-pt `O(Δx⁴, Δt⁴)` at equal `0.1%` dispersion accuracy, while `1`-pass
+  compact FDTD
   at `0.324 ms/step` is faster when coarse dispersion is acceptable and periodic `cuFFT` `k`-space
   propagation at `1.44 ms/step` is dispersion-free on homogeneous obstacle-free boxes, against
   `1.51 ms/step` for the `R = 7` separable step in `float32` and `1.09 ms/step` with `float16`
