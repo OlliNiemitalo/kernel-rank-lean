@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Renders paper/main.pdf pages to PNGs and extracts the raw PDF text stream under
+# .tmp/paper-pages/ for visual layout inspection and zero-context cold-reader reviews.
+#
+#   scripts/render-paper-pages [FIRST_PAGE [LAST_PAGE]]
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+cd "$repo"
+
+[ -f paper/main.pdf ] || "$repo/scripts/build-paper"
+
+outdir="$tmp/paper-pages"
+mkdir -p "$outdir"
+rm -f "$outdir"/page-*.png "$outdir/main.txt"
+
+pdftotext -raw paper/main.pdf "$outdir/main.txt"
+
+pages="$(pdfinfo paper/main.pdf | awk '/^Pages:/ {print $2}')"
+first="${1:-1}"
+last="${2:-${1:-$pages}}"
+
+pdftoppm -png -r 180 -f "$first" -l "$last" paper/main.pdf "$outdir/page"
+count="$(ls -1 "$outdir"/page-*.png 2>/dev/null | wc -l)"
+echo "rendered $count page(s) ($first..$last of $pages) to .tmp/paper-pages/page-*.png and extracted .tmp/paper-pages/main.txt"

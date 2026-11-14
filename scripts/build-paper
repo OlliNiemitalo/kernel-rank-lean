@@ -15,4 +15,13 @@ if [ ! -x "$tectonic_bin" ]; then
     | tar -xz -C "$tmp/bin"
 fi
 
-"$tectonic_bin" -X compile paper/main.tex --outdir paper
+outdir="paper"
+if [ "${1:-}" = "--outdir" ]; then
+  [ -n "${2:-}" ] || { echo "usage: scripts/build-paper [--outdir DIR]" >&2; exit 2; }
+  outdir="$2"
+  shift 2
+fi
+[ $# -eq 0 ] || { echo "usage: scripts/build-paper [--outdir DIR]" >&2; exit 2; }
+mkdir -p "$outdir"
+
+"$tectonic_bin" -X compile paper/main.tex --outdir "$outdir"

@@ -21,19 +21,20 @@
   proofs" below).
 - `Applications/`: reproducible Python/SciPy/PyTorch/Triton numerical optimization, simulation,
   and GPU benchmark scripts (`blur_2d.py`, `acoustics_3d.py`, `generate_figures.py`, JSON
-  results) accompanying Section 5 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
-  and all Matplotlib/`uv`/Triton caches inside `.tmp/`). `gpu_kernels.py` holds the GPU
-  implementations (separable, direct, `cuFFT`) used by both scripts; see "GPU benchmarks" below.
-  `--gpu-only` on either script reruns only its GPU parts from the stored optimization results;
-  `--discrete-only` on `blur_2d.py` reruns only discrete-vs.-continuous convergence and warm-start
-  analyses; `--hetero-only` on `acoustics_3d.py` reruns only the spatially varying $c(\mathbf{x})$
-  experiment.
+  results) accompanying Section 6 and Appendix B of the paper; run via `scripts/python` (which
+  keeps `.tmp/venv` and all Matplotlib/`uv`/Triton caches inside `.tmp/`). `gpu_kernels.py` holds
+  the GPU implementations (separable, direct, `cuFFT`) used by both scripts; see "GPU benchmarks"
+  below. Targeted flags rerun individual studies from stored results: `--gpu-only` (both scripts),
+  `--discrete-only` and `--ablation-only` (`blur_2d.py`), and `--hetero-only` and
+  `--calibration-only` (`acoustics_3d.py`).
 - `paper/`: LaTeX source (`main.tex`), vector figures (`fig_overview_pipeline.pdf`,
   `fig_blur_2d.pdf`, `fig_discrete_vs_continuous.pdf`, `fig_discrete_convergence.pdf`,
-  `fig_acoustics_3d.pdf`, `fig_acoustics_hetero.pdf`), compiled PDF (`main.pdf`), and metadata (`metadata.json`) for the
-  aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper` (static Tectonic in
-  `.tmp/bin`) and submitted/updated via `scripts/submit-aixiv` (reads
-  `AIXIV_GITHUB_COPILOT_TOKEN` from the environment; never commit tokens).
+  `fig_acoustics_3d.pdf`, `fig_acoustics_hetero.pdf`), compiled PDF (`main.pdf`), and metadata
+  (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper`
+  (static Tectonic in `.tmp/bin`), audited via `scripts/check paper` (`scripts/check-paper`),
+  rendered for visual/cold-reader review via `scripts/render-paper-pages`, and submitted/updated
+  via `scripts/submit-aixiv` and `scripts/aixiv-reviews` (reads `AIXIV_GITHUB_COPILOT_TOKEN` from
+  the environment; never commit tokens).
 - `scripts/`: tool wrappers, setup, paper scripts, and the check script; `.githooks/`: the
   pre-commit hook.
 - `README.md`: theorem statements, potential applications, file table, commit history with Lean
@@ -60,8 +61,8 @@
   `isabelle`.
 - `scripts/setup` (once): installs elan and Isabelle2026 into `.tmp/` and sets
   `git config core.hooksPath .githooks`.
-- **Checks.** `scripts/check [--force] [lean] [isabelle]` is the single check used both during
-  work and by the pre-commit hook (`.githooks/pre-commit`, which adds `git diff --cached
+- **Checks.** `scripts/check [--force] [lean] [isabelle] [paper]` is the single check used both
+  during work and by the pre-commit hook (`.githooks/pre-commit`, which adds `git diff --cached
   --check` and `--staged`); there is no GitHub CI for the proofs. A passing component writes
   `.tmp/checks/<component>.stamp`, keyed by a hash of the git blob ids of its inputs (sources,
   build files, toolchain version, the scripts) as in the working tree. The hook requires the
@@ -78,6 +79,14 @@
     `Isabelle/ROOT` enables `quick_and_dirty`, which a command-line `-o quick_and_dirty=false`
     does not override. The words `axiomatization` and `axioms` are rejected anywhere in
     `Isabelle/*.thy`, including comments.
+  - `paper` (`scripts/check-paper`): compiles `paper/main.tex` into a scratch directory with
+    Tectonic and verifies (1) zero final-pass TeX/`xdvipdfmx` warnings, (2) `paper/main.pdf`
+    matches the freshly compiled output, (3) `pdftotext -raw` preserves Unicode math (`‖`, `ℝ`,
+    `𝔽`) with no OT1 font corruptions (`kxk2`) or missing glyphs, (4) 1-to-1 `\cite`/`\bibitem`
+    and `\ref`/`\label` resolution, (5) no truncated `\leanid{...}`/`\texttt{...}` names (`...`),
+    every repo `\leanid` symbol present in `.lean` sources, and all `lean_theorems` in
+    `scripts/check` documented in `paper/main.tex`, and (6) word-for-word parity between
+    `\begin{abstract}...\end{abstract}` and `paper/metadata.json`.
 - Lean `leanprover/lean4:v4.36.0-rc2`, Mathlib `v4.36.0-rc2`
   (commit `9d581dfff2e41de989072ea63abf3daf69311520`). Do not change dependencies unless asked.
 - A single Lean module: `scripts/lake build KernelRankLean.ComplexRank`. A scratch file:
@@ -115,6 +124,40 @@
 - Lean/Mathlib search resources: <https://leansearch.net/> (POST `/search`),
   <https://loogle.lean-lang.org/json?q=...> (separate constraints with commas), and a local
   copy of the Lean Zulip archive, `lean-zulip-archive` (ask the user for its location).
+
+## Paper workflow and release checklist
+
+- **Keep `unicode-math` for clean PDF text extraction.** Legacy OT1 Computer Modern fonts cause
+  `pdftotext -raw` (used by automated reviewers and search tools) to extract `\|x\|^2` as `kxk2`,
+  `\mathbb{K}` / `\mathcal{R}` as `K` / `R`, and superscript `2^{d-1}` as `2d−1`. Keep
+  `\usepackage{unicode-math}` (Latin Modern Math OpenType in Tectonic); write `\symbb{k}` in math
+  mode rather than `\texttt{𝕜}` (`lmmono` lacks `U+1D55C`).
+- **Inspect rendered pages visually, not just TeX exit codes.** After changing figures, TikZ
+  diagrams, or wide tables, run `scripts/render-paper-pages [FIRST [LAST]]` and inspect the
+  resulting `.tmp/paper-pages/page-*.png` images with `view` (and `.tmp/paper-pages/main.txt`) to
+  catch arrow overlaps, cramped floats, or unintended bitmap interpolation.
+- **Restructure rather than accreting prose patches.** Keep one symbol per concept (`Table 3`),
+  put global mappings (question-to-Lean `Table 1`, Mathlib border-rank idioms `Table 4`, module
+  DAG `Figure 2`, full Lean identifiers `Tables A.2–A.3`) in dedicated tables/diagrams rather
+  than parenthetical prose, keep detailed benchmark/coefficient tables in Appendix B, and never
+  describe `float64`-checked numerical/GPU studies as `"unverified"` (distinguish Lean-proved
+  theorems, analytical derivations, and illustrative GPU studies explicitly as in Section 1.3).
+- **Benchmark design rules.** Include the strongest competing paradigm even where it wins
+  (`cuFFT`, 1-pass FDTD), include simple non-algebraic baselines in ablations (e.g. channel
+  reordering and `float32` outer accumulation alongside $\mathrm{GL}_R(\mathbb{R})$
+  orthogonalization), pair any analytical resolution-scaling extrapolation with a measured
+  multi-grid calibration on the same physical problem, and report `mean ± std` and memory
+  footprints from the outset.
+- **Pre-upload cold-reader pass and author replies.** Before uploading a new version with
+  `scripts/submit-aixiv --version aixiv.261111.000007`:
+  1. Run `scripts/build-paper` and `scripts/check` (which runs `lean`, `isabelle`, and `paper`).
+  2. For substantial text/structural revisions, run `scripts/render-paper-pages` and launch a
+     zero-context review subagent given *only* `.tmp/paper-pages/` (no `.lean`/`.tex` sources or
+     prior chat context) to catch curse-of-knowledge omissions before submission.
+  3. Check reviews with `scripts/aixiv-reviews` and post point-by-point replies to any unreplied
+     reviews via `scripts/aixiv-reviews --reply <REVIEW_ID> <MARKDOWN_FILE>` (`scripts/submit-aixiv`
+     enforces both `scripts/check paper` and `--check-replied` automatically; note that Cloudflare
+     blocks Python `urllib`'s default User-Agent, so use `curl` as in `scripts/aixiv-reviews`).
 
 ## Mathematics of the current proof
 

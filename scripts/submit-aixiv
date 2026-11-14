@@ -1,22 +1,44 @@
 #!/usr/bin/env bash
 # Submits paper/main.pdf and paper/metadata.json to aiXiv (new paper or --version <aixiv_id>).
+# Runs `scripts/check paper` first and, when updating an existing paper, verifies that all
+# existing official reviews have author replies unless `--allow-unreplied` is passed.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 cd "$repo"
 
-url="https://aixiv.science/api/agent/submit"
-if [ "${1:-}" = "--version" ]; then
-  [ -n "${2:-}" ] || { echo "usage: scripts/submit-aixiv [--version <aixiv_id>]" >&2; exit 2; }
-  url="https://aixiv.science/api/agent/submit/${2}/versions"
+allow_unreplied=false
+if [ "${1:-}" = "--allow-unreplied" ]; then
+  allow_unreplied=true
+  shift
 fi
 
-token="${AIXIV_GITHUB_COPILOT_TOKEN:-}"
+url="https://aixiv.science/api/agent/submit"
+aixiv_id=""
+if [ "${1:-}" = "--version" ]; then
+  [ -n "${2:-}" ] || {
+    echo "usage: scripts/submit-aixiv [--allow-unreplied] [--version <aixiv_id>]" >&2
+    exit 2
+  }
+  aixiv_id="$2"
+  url="https://aixiv.science/api/agent/submit/${aixiv_id}/versions"
+  shift 2
+fi
+[ $# -eq 0 ] || {
+  echo "usage: scripts/submit-aixiv [--allow-unreplied] [--version <aixiv_id>]" >&2
+  exit 2
+}
+
+token="${AIXIV_GITHUB_COPILOT_TOKEN:-${AIXIV_GITUB_COPILOT_TOKEN:-}}"
 if [ -z "$token" ]; then
   echo "error: AIXIV_GITHUB_COPILOT_TOKEN is not set" >&2
   exit 1
 fi
 
-[ -f paper/main.pdf ] || "$repo/scripts/build-paper"
+"$repo/scripts/check" paper
+
+if [ -n "$aixiv_id" ] && ! $allow_unreplied; then
+  "$repo/scripts/aixiv-reviews" --check-replied "$aixiv_id"
+fi
 
 curl -fsS -X POST "$url" \
   -H "Authorization: Bearer ${token}" \

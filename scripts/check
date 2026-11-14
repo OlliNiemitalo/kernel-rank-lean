@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Checks the Lean and Isabelle proofs, for regular work and as the pre-commit hook.
+# Checks the Lean/Isabelle proofs and the paper, for regular work and as the pre-commit hook.
 #
-#   scripts/check [--staged] [--force] [lean] [isabelle]
+#   scripts/check [--staged] [--force] [lean] [isabelle] [paper]
 #
 # A component that passes gets a stamp `.tmp/checks/<component>.stamp` whose first line is a
 # key: a hash of the git blob ids of the component's input files (as in the working tree) and
@@ -17,6 +17,10 @@ mkdir -p "$checks"
 common_inputs=(scripts/check scripts/env.sh)
 lean_inputs=('*.lean' lakefile.toml lake-manifest.json lean-toolchain scripts/lake)
 isabelle_inputs=(Isabelle/ROOT 'Isabelle/*.thy' scripts/isabelle)
+paper_inputs=(
+  'paper/main.tex' 'paper/main.pdf' 'paper/metadata.json' 'paper/*.pdf'
+  '*.lean' scripts/build-paper scripts/check-paper
+)
 
 # Theorems whose axioms must be exactly the standard ones.
 lean_theorems=(
@@ -65,11 +69,11 @@ for arg in "$@"; do
   case "$arg" in
     --staged) staged=true ;;
     --force) force=true ;;
-    lean | isabelle) components+=("$arg") ;;
-    *) echo "usage: scripts/check [--staged] [--force] [lean] [isabelle]" >&2; exit 2 ;;
+    lean | isabelle | paper) components+=("$arg") ;;
+    *) echo "usage: scripts/check [--staged] [--force] [lean] [isabelle] [paper]" >&2; exit 2 ;;
   esac
 done
-[ ${#components[@]} -gt 0 ] || components=(lean isabelle)
+[ ${#components[@]} -gt 0 ] || components=(lean isabelle paper)
 
 inputs() {
   local -n specs="${1}_inputs"
@@ -80,6 +84,10 @@ tool_version() {
   case "$1" in
     lean) cat lean-toolchain ;;
     isabelle) "$repo/scripts/isabelle" version ;;
+    paper)
+      grep -E '^tectonic_ver=' "$repo/scripts/build-paper"
+      pdftotext -v 2>&1 | head -1
+      ;;
   esac
 }
 
@@ -183,6 +191,16 @@ check_isabelle() {
   "$repo/scripts/isabelle" build_log -H 'Warning|Legacy' -T KernelRank_NSA.Semigroup_NSA \
     KernelRank_NSA >> "$log" 2>&1 || true
   echo "isabelle: session KernelRank_NSA builds; ${#isabelle_theorems[@]} theorem(s) use no oracles"
+}
+
+check_paper() {
+  local log="$checks/paper.log" out
+  if ! out="$("$repo/scripts/check-paper" 2> "$log")"; then
+    cat "$log" >&2
+    echo "paper: check-paper failed (full log: $log)" >&2
+    return 1
+  fi
+  echo "$out"
 }
 
 status=0

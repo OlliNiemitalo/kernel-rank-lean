@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Audits paper/main.tex, paper/main.pdf, paper/metadata.json, and Lean identifier parity."""
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# Allowed external / Mathlib / filename tokens inside \leanid{...}
+EXTERNAL_IDENTIFIERS = {
+    "nhds",
+    "nhdsWithin",
+    "TendstoUniformlyOn",
+    "IsCompact",
+    "Tendsto",
+    "NeBot",
+    "T2Space",
+    "isNormableSpace_of_finiteDimensional",
+    "FiniteDimensional.complete",
+    "span_fourier_closure_eq_top",
+    "native_decide",
+    "HOL-Nonstandard_Analysis",
+    "Semigroup_NSA.thy",
+    "blur_2d.py",
+    "acoustics_3d.py",
+    "gpu_kernels.py",
+}
+
+
+def fail(msg: str) -> None:
+    print(f"paper: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def normalize_tex_abstract(tex_abs: str) -> str:
+    s = tex_abs.strip()
+    repls = [
+        (r"\varphi", "phi"),
+        (r"\exp(-\alpha\|x\|^2)\cos(\omega\|x\|^2 + \theta)", "exp(-alpha ||x||^2) cos(omega ||x||^2 + theta)"),
+        (r"\exp(-\alpha\|x\|^2)", "exp(-alpha ||x||^2)"),
+        (r"\|x\|^2\cos(\|x\|^2)", "||x||^2 cos(||x||^2)"),
+        (r"\cos(\|x\|^2)", "cos(||x||^2)"),
+        (r"\|x\|^2", "||x||^2"),
+        (r"\R^d", "R^d"),
+        (r"\R", "R"),
+        (r"\C", "C"),
+        (r"\ge", ">="),
+        (r"\le", "<="),
+        (r"\times", "x"),
+        (r"---", " — "),
+        (r"--", "-"),
+        (r"Section~\ref{sec:applications}", "Section 6"),
+        (r"Section~\ref{sec:limitations}", "Section 7"),
+        (r"c(\mathbf{x})", "c(x)"),
+        (r"~", " "),
+        (r"\,", " "),
+    ]
+    for old, new in repls:
+        s = s.replace(old, new)
+    s = re.sub(r"\\(?:emph|texttt|url)\{([^}]*)\}", r"\1", s)
+    s = s.replace("$", "")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s)
+    s = re.sub(r"\n{2,}", "\n\n", s)
+    return s.strip()
+
+
+def check_clean_tectonic_and_fresh_pdf() -> tuple[int, str]:
+    scratch = REPO / ".tmp" / "checks" / "paper-build"
+    if scratch.exists():
+        shutil.rmtree(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    proc = subprocess.run(
+        [str(REPO / "scripts" / "build-paper"), "--outdir", str(scratch)],
+        cwd=REPO,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    combined = proc.stdout or ""
+    if proc.returncode != 0:
+        print(combined, file=sys.stderr)
+        fail("Tectonic compilation failed")
+
+    # Split passes; require the final TeX pass and xdvipdfmx pass to have zero warnings.
+    passes = re.split(r"note: (?:Running|Rerunning) TeX", combined)
+    final_pass = passes[-1] if passes else combined
+    warnings = [
+        line for line in final_pass.splitlines()
+        if line.startswith("warning:") and "warnings were issued by the TeX engine" not in line
+    ]
+    if warnings:
+        fail("final TeX/xdvipdfmx pass emitted warnings:\n  " + "\n  ".join(warnings))
+
+    committed_pdf = REPO / "paper" / "main.pdf"
+    built_pdf = scratch / "main.pdf"
+    if not committed_pdf.is_file():
+        fail("paper/main.pdf does not exist; run scripts/build-paper")
+
+    txt_committed = subprocess.check_output(
+        ["pdftotext", "-raw", str(committed_pdf), "-"], text=True
+    )
+    txt_built = subprocess.check_output(
+        ["pdftotext", "-raw", str(built_pdf), "-"], text=True
+    )
+    info_committed = subprocess.check_output(["pdfinfo", str(committed_pdf)], text=True)
+    info_built = subprocess.check_output(["pdfinfo", str(built_pdf)], text=True)
+    m_c = re.search(r"^Pages:\s+(\d+)", info_committed, re.M)
+    m_b = re.search(r"^Pages:\s+(\d+)", info_built, re.M)
+    pages_c = int(m_c.group(1)) if m_c else -1
+    pages_b = int(m_b.group(1)) if m_b else -1
+    if pages_c != pages_b or txt_committed != txt_built:
+        fail("paper/main.pdf does not match freshly compiled paper/main.tex; run scripts/build-paper")
+
+    return pages_c, txt_committed
+
+
+def check_pdf_text_layer(pdf_text: str) -> None:
+    if "\ufffd" in pdf_text or "□" in pdf_text:
+        fail("PDF text layer contains missing-glyph replacement characters")
+    if "kxk2" in pdf_text:
+        fail("PDF text layer extracted ||x||^2 as 'kxk2' (OT1 font regression; keep unicode-math)")
+    for glyph, desc in [("‖", "double-bar norm U+2016"), ("ℝ", "blackboard bold R"), ("𝔽", "blackboard bold F")]:
+        if glyph not in pdf_text:
+            fail(f"PDF text layer is missing expected Unicode math symbol {desc} ({glyph!r})")
+
+
+def check_citations_and_labels(tex: str) -> int:
+    # Strip TeX comments
+    uncommented = "\n".join(re.sub(r"(?<!\\)%.*$", "", line) for line in tex.splitlines())
+
+    cites: set[str] = set()
+    for m in re.finditer(r"\\cite(?:\[[^\]]*\])?\{([^}]*)\}", uncommented):
+        for key in m.group(1).split(","):
+            if key.strip():
+                cites.add(key.strip())
+    bibitems = {m.group(1).strip() for m in re.finditer(r"\\bibitem\{([^}]*)\}", uncommented)}
+    missing_bib = sorted(cites - bibitems)
+    unused_bib = sorted(bibitems - cites)
+    if missing_bib:
+        fail(f"undefined \\cite keys: {missing_bib}")
+    if unused_bib:
+        fail(f"uncited \\bibitem keys: {unused_bib}")
+
+    labels = {m.group(1).strip() for m in re.finditer(r"\\label\{([^}]*)\}", uncommented)}
+    refs: set[str] = set()
+    for m in re.finditer(r"\\(?:eq)?ref\{([^}]*)\}", uncommented):
+        for key in m.group(1).split(","):
+            if key.strip():
+                refs.add(key.strip())
+    missing_labels = sorted(refs - labels)
+    if missing_labels:
+        fail(f"undefined \\ref/\\eqref labels: {missing_labels}")
+
+    return len(bibitems)
+
+
+def check_lean_identifiers(tex: str) -> int:
+    trunc = re.findall(r"\\(?:leanid|texttt)\{[^}]*(?:\.\.\.|\\dots)[^}]*\}", tex)
+    if trunc:
+        fail(f"truncated identifiers are not allowed: {trunc}")
+
+    check_sh = (REPO / "scripts" / "check").read_text()
+    m = re.search(r"lean_theorems=\((.*?)\)", check_sh, re.S)
+    if not m:
+        fail("could not parse lean_theorems from scripts/check")
+    audited = [line.strip() for line in m.group(1).splitlines() if line.strip()]
+
+    plain_tex = (
+        tex.replace(r"\_", "_")
+        .replace(r"\allowbreak ", "")
+        .replace(r"\allowbreak", "")
+        .replace(r"\-", "")
+    )
+    for full in audited:
+        short = full.split(".", 1)[1] if full.startswith(("KernelRank.", "Experiments.")) else full
+        if short not in plain_tex:
+            fail(f"audited theorem {full} is not documented in paper/main.tex")
+
+    lean_sources = "\n".join(
+        p.read_text()
+        for p in sorted((REPO / "KernelRankLean").glob("*.lean"))
+        + sorted((REPO / "Experiments").glob("*.lean"))
+    )
+    for raw in re.findall(r"\\leanid\{([^}]*)\}", tex):
+        ident = (
+            raw.replace(r"\_", "_")
+            .replace(r"\allowbreak ", "")
+            .replace(r"\allowbreak", "")
+            .replace(r"\-", "")
+            .strip()
+        )
+        if ident in EXTERNAL_IDENTIFIERS or " " in ident or ident.startswith("l."):
+            continue
+        leaf = ident.split(".")[-1]
+        if not re.search(rf"\b{re.escape(leaf)}\b", lean_sources):
+            fail(f"\\leanid{{{ident}}} not found in KernelRankLean/*.lean or Experiments/*.lean")
+
+    return len(audited)
+
+
+def check_metadata_sync(tex: str) -> None:
+    meta_path = REPO / "paper" / "metadata.json"
+    meta = json.loads(meta_path.read_text())
+    for key in ("title", "authorship_type", "authors", "corresponding_author", "license", "abstract"):
+        if not meta.get(key):
+            fail(f"paper/metadata.json is missing required field {key!r}")
+
+    m = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", tex, re.S)
+    if not m:
+        fail("could not find \\begin{abstract}...\\end{abstract} in paper/main.tex")
+    tex_norm = normalize_tex_abstract(m.group(1))
+    meta_norm = re.sub(r"[ \t]+", " ", meta["abstract"].strip())
+    if tex_norm != meta_norm:
+        fail(
+            "paper/metadata.json abstract differs from paper/main.tex abstract:\n"
+            f"--- main.tex (normalized) ---\n{tex_norm}\n"
+            f"--- metadata.json ---\n{meta_norm}"
+        )
+
+
+def main() -> None:
+    tex = (REPO / "paper" / "main.tex").read_text()
+    pages, pdf_text = check_clean_tectonic_and_fresh_pdf()
+    check_pdf_text_layer(pdf_text)
+    nbib = check_citations_and_labels(tex)
+    nthm = check_lean_identifiers(tex)
+    check_metadata_sync(tex)
+    print(
+        f"paper: {pages} pages, 0 final-pass warnings, Unicode math intact, "
+        f"{nthm} audited theorems & {nbib} citations verified, metadata synced"
+    )
+
+
+if __name__ == "__main__":
+    main()
