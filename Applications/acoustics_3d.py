@@ -1582,6 +1582,239 @@ def run_heterogeneous_lens_experiment(propagators):
     }
 
 
+def evaluate_border_rank_precision():
+    """
+    Empirical precision sweep on K_3(x) = ||x||^2 cos(||x||^2) over [-1.2, 1.2]^3 across IEEE
+    float16, float32, and float64, comparing:
+      1) Exact 7-term angle-sampling decomposition (Example 2.18, Prop. 2.15, M^R_{3,1} = 7);
+      2) 6-term radial multi-Gaussian border limit u_h(||x||^2) cos(||x||^2) (Thm. 2.9, O(h^-1));
+      3) 5-term non-Gaussian real border limit F_h(x) of Eq. (7) (Thm. 2.10(2), O(h^-3)).
+    """
+    u = np.linspace(-1.2, 1.2, 31, dtype=np.float64)
+    x0, x1, x2 = np.meshgrid(u, u, u, indexing="ij")
+    s_tot = x0**2 + x1**2 + x2**2
+    K_ref = s_tot * np.cos(s_tot)
+    k_inf = float(np.max(np.abs(K_ref)))
+
+    def cast_arr(arr, dt):
+        return arr.astype(dt)
+
+    # 1. Exact 7-term formula
+    exact7 = {}
+    for dt_name, dt in [("float16", np.float16), ("float32", np.float32), ("float64", np.float64)]:
+        u2_0, u2_1, u2_2 = cast_arr(x0**2, dt), cast_arr(x1**2, dt), cast_arr(x2**2, dt)
+        acc = np.zeros_like(u2_0, dtype=dt)
+        w = dt(4.0 / 7.0)
+        for r in range(7):
+            ph3 = dt(3.0 * math.pi * r / 7.0)
+            ph1 = dt(math.pi * r / 7.0)
+            f0 = np.cos(u2_0 - ph3, dtype=dt) + u2_0 * np.cos(u2_0 - ph1, dtype=dt)
+            f1 = np.cos(u2_1 - ph3, dtype=dt) + u2_1 * np.cos(u2_1 - ph1, dtype=dt)
+            f2 = np.cos(u2_2 - ph3, dtype=dt) + u2_2 * np.cos(u2_2 - ph1, dtype=dt)
+            term = w * f0 * f1 * f2
+            acc = acc + term if (r % 2 == 0) else acc - term
+        err = float(np.max(np.abs(acc.astype(np.float64) - K_ref)) / k_inf)
+        exact7[dt_name] = err
+
+    def eval_6term(h_val: float, dt):
+        # 2 complex Gaussians evaluated via 3-term Prop. 2.14 each = 6 real products
+        u2 = [cast_arr(x0**2, dt), cast_arr(x1**2, dt), cast_arr(x2**2, dt)]
+        h_d = dt(h_val)
+        inv_h = dt(1.0 / h_val)
+        w3 = dt(4.0 / 3.0)
+        acc = np.zeros_like(u2[0], dtype=dt)
+        for sign_g, rate_re in [(+1, h_val), (-1, 0.0)]:
+            for r in range(3):
+                ang = dt(math.pi * r / 3.0)
+                prod = None
+                for j in range(3):
+                    env = np.exp(dt(rate_re) * u2[j], dtype=dt)
+                    fj = env * np.cos(u2[j] - ang, dtype=dt)
+                    prod = fj if prod is None else (prod * fj)
+                term = (inv_h * w3) * prod
+                s_tot_sign = sign_g * (1 if r % 2 == 0 else -1)
+                acc = acc + term if s_tot_sign > 0 else acc - term
+        if not np.all(np.isfinite(acc)):
+            return float("inf")
+        return float(np.max(np.abs(acc.astype(np.float64) - K_ref)) / k_inf)
+
+    def eval_5term(h_val: float, dt):
+        u2 = [cast_arr(x0**2, dt), cast_arr(x1**2, dt), cast_arr(x2**2, dt)]
+        c = [np.cos(v, dtype=dt) for v in u2]
+        s = [np.sin(v, dtype=dt) for v in u2]
+        half = dt(0.5)
+        sq3_2 = dt(0.5 * math.sqrt(3.0))
+        p1 = [half * c[j] - sq3_2 * s[j] for j in range(3)]
+        p2 = [-half * c[j] - sq3_2 * s[j] for j in range(3)]
+        h_d = dt(h_val)
+        h2_d = dt(h_val * h_val)
+        c_t1 = dt(1.0 / (3.0 * h_val))
+        c_t2 = dt(1.0 / (h_val ** 3))
+        c_t4 = dt(4.0 / (3.0 * h_val))
+        if not (np.isfinite(c_t1) and np.isfinite(c_t2) and np.isfinite(c_t4)):
+            return float("inf")
+        t1 = c_t1 * (c[0] + dt(4.0) * h_d * u2[0] * c[0]) * (c[1] + dt(4.0) * h_d * u2[1] * c[1]) * (c[2] + dt(4.0) * h_d * u2[2] * c[2])
+        t2 = c_t2 * ((s[0] + h2_d * c[0]) * (s[1] + h2_d * c[1]) * (s[2] + h2_d * c[2]) - s[0] * s[1] * s[2])
+        t4 = c_t4 * (p1[0] + h_d * u2[0] * p1[0]) * (p1[1] + h_d * u2[1] * p1[1]) * (p1[2] + h_d * u2[2] * p1[2])
+        t5 = c_t4 * (p2[0] + h_d * u2[0] * p2[0]) * (p2[1] + h_d * u2[1] * p2[1]) * (p2[2] + h_d * u2[2] * p2[2])
+        acc = (t1 + t2) - t4 + t5
+        if not np.all(np.isfinite(acc)):
+            return float("inf")
+        return float(np.max(np.abs(acc.astype(np.float64) - K_ref)) / k_inf)
+
+    h_grid = np.logspace(-9.0, -0.2, 129)
+    minima = {"6term_gaussian_border": {}, "5term_nongaussian_border": {}}
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        for dt_name, dt in [("float16", np.float16), ("float32", np.float32), ("float64", np.float64)]:
+            errs6 = [eval_6term(float(h), dt) for h in h_grid]
+            errs5 = [eval_5term(float(h), dt) for h in h_grid]
+            i6 = int(np.argmin(errs6))
+            i5 = int(np.argmin(errs5))
+            minima["6term_gaussian_border"][dt_name] = {"best_h": float(h_grid[i6]), "min_rel_linf_err": float(errs6[i6])}
+            minima["5term_nongaussian_border"][dt_name] = {"best_h": float(h_grid[i5]), "min_rel_linf_err": float(errs5[i5])}
+
+    print("  Border-rank precision on K_3(x)=||x||^2 cos(||x||^2), [-1.2, 1.2]^3 (rel L_inf error):")
+    print(f"    Exact 7-term (Prop. 2.15): fp16={exact7['float16']:.4e}, fp32={exact7['float32']:.4e}, fp64={exact7['float64']:.4e}")
+    for kind, d in minima.items():
+        print(
+            f"    {kind:25s}: "
+            f"fp16={d['float16']['min_rel_linf_err']:.4e} (h*={d['float16']['best_h']:.3g}), "
+            f"fp32={d['float32']['min_rel_linf_err']:.4e} (h*={d['float32']['best_h']:.3g}), "
+            f"fp64={d['float64']['min_rel_linf_err']:.4e} (h*={d['float64']['best_h']:.3g})"
+        )
+    return {"exact_7term_rel_linf_err": exact7, "border_min_over_h": minima}
+
+
+def run_multigrid_fdtd_calibration(propagators):
+    """
+    Direct measured multi-grid calibration of the analytical FDTD resolution-scaling estimate on an
+    identical physical 3-D spherical pulse problem:
+      - Physical cube [-64, 64)^3 (L_phys = 128), broadband Gaussian pulse sigma0 = 1.40,
+        physical duration c_0 T_phys = 42.0 (free of boundary reflections since 42 + 6 < 64),
+        physical receivers at (30, 0, 0), (22, 22, 0), (18, 18, 18) (exact grid nodes for every m in
+        {1, 2, 2.5, 3, 3.5, 4}).
+      - Compares Rank-7 (2c+1r, nu=1.00) on coarse 128^3 (dx=1.0, fp32 & fp16-slab) against
+        fourth-order 25-pt O(dx^4, dt^4) FDTD (nu=1/sqrt(3)) on G = 128, 256, 320, 384, 448, 512.
+    """
+    device = torch.device("cuda")
+    prop_r7 = next(p for p in propagators if p["label"] == "Rank-7 (2c+1r, nu=1.00)")
+    factors_r7, _ = build_3d_separable_factors(prop_r7["L"], prop_r7["components"])
+
+    L_phys = 128.0
+    sigma0 = 1.40
+    ct_phys = 42.0
+    rec_phys = {"axial": (30.0, 0.0, 0.0), "face_diag": (22.0, 22.0, 0.0), "body_diag": (18.0, 18.0, 18.0)}
+    rec_radii = {k: math.sqrt(x**2 + y**2 + z**2) for k, (x, y, z) in rec_phys.items()}
+
+    rows = []
+
+    def eval_case(label: str, kind: str, G: int, nu: float, mid_dtype=torch.float32):
+        dx = L_phys / G
+        dt_ct = nu * dx
+        n_steps = int(round(ct_phys / dt_ct))
+        c_idx = G // 2
+        rec_idx = {k: (c_idx + int(round(x / dx)), c_idx + int(round(y / dx)), c_idx + int(round(z / dx)))
+                   for k, (x, y, z) in rec_phys.items()}
+
+        # Initialize p(r, 0) and p(r, dt_ct) on GPU in chunks to stay lean even at G = 512
+        p_prev = torch.empty((G, G, G), device=device, dtype=torch.float32)
+        p_curr = torch.empty((G, G, G), device=device, dtype=torch.float32)
+        p_next = torch.empty((G, G, G), device=device, dtype=torch.float32)
+        u_1d = (np.arange(G, dtype=np.float64) - c_idx) * dx
+        yy, zz = np.meshgrid(u_1d, u_1d, indexing="ij")
+        yz2 = yy**2 + zz**2
+        for ix in range(G):
+            rr_plane = np.sqrt(u_1d[ix]**2 + yz2)
+            p_prev[ix] = torch.from_numpy(exact_spherical_pulse_3d(rr_plane, 0.0, sigma0=sigma0).astype(np.float32)).to(device)
+            p_curr[ix] = torch.from_numpy(exact_spherical_pulse_3d(rr_plane, dt_ct, sigma0=sigma0).astype(np.float32)).to(device)
+
+        if kind == "sep":
+            plan = gk.SeparableStep3D.tuned(factors_r7, prop_r7["alpha0"], p_curr, p_prev, p_next, mid_dtype=mid_dtype)
+            step_fn = lambda pc, pp, pn: plan(pc, pp, pn)
+            scratch_mib = float((plan.mid1.numel() + plan.mid2.numel()) * plan.mid1.element_size() / (1 << 20))
+        else:
+            c1_25 = (8.0 / 3.0) * (nu**2) - 2.0 * (nu**4)
+            c2_25 = ((nu**4) - (nu**2)) / 6.0
+            c11_25 = (2.0 / 3.0) * (nu**4)
+            w0_25 = 2.0 - 3.0 * (c1_25 + c2_25 + c11_25)
+            wf_25, wa_25, we_25 = 0.5 * c1_25, 0.5 * c2_25, 0.25 * c11_25
+            grid_2d = (G * G, triton.cdiv(G, 256))
+            step_fn = lambda pc, pp, pn: fdtd25_o4_triton_kernel[grid_2d](pc, pp, pn, w0_25, wf_25, wa_25, we_25, G=G, BLOCK_Z=256)
+            scratch_mib = 0.0
+
+        traces = {k: [float(p_prev[ix, iy, iz].item()), float(p_curr[ix, iy, iz].item())]
+                  for k, (ix, iy, iz) in rec_idx.items()}
+        ct_list = [0.0, dt_ct]
+        for st in range(2, n_steps + 1):
+            step_fn(p_curr, p_prev, p_next)
+            p_prev, p_curr, p_next = p_curr, p_next, p_prev
+            ct_list.append(st * dt_ct)
+            for k, (ix, iy, iz) in rec_idx.items():
+                traces[k].append(float(p_curr[ix, iy, iz].item()))
+
+        rel_l2 = {}
+        for k, r_val in rec_radii.items():
+            ex = np.array([float(exact_spherical_pulse_3d(np.array([r_val]), ct, sigma0=sigma0)[0]) for ct in ct_list])
+            num = np.array(traces[k], dtype=np.float64)
+            rel_l2[k] = float(np.linalg.norm(num - ex) / np.linalg.norm(ex))
+
+        # Time a single step accurately via 10 CUDA-Event batches, then total propagation = n_steps * ms_step
+        iters_b = 15 if G <= 256 else (8 if G <= 384 else 4)
+        ms_step, ms_step_std = gk.cuda_batch_stats(lambda: step_fn(p_curr, p_prev, p_next), warmup=6, n_batches=10, iters_per_batch=iters_b)
+        total_ms = n_steps * ms_step
+        total_ms_std = n_steps * ms_step_std
+        inplace_field_mib = float(2 * (G**3) * 4 / (1 << 20))
+        vram_inplace_mib = inplace_field_mib + scratch_mib
+
+        del p_prev, p_curr, p_next
+        torch.cuda.empty_cache()
+
+        row = {
+            "label": label,
+            "G": G,
+            "refinement_m": G / 128.0,
+            "dx": dx,
+            "nu": nu,
+            "n_steps": n_steps,
+            "ms_per_step": ms_step,
+            "ms_per_step_std": ms_step_std,
+            "total_sim_ms": total_ms,
+            "total_sim_ms_std": total_ms_std,
+            "field_mib_inplace": inplace_field_mib,
+            "scratch_mib": scratch_mib,
+            "total_vram_inplace_mib": vram_inplace_mib,
+            "rel_l2_err": rel_l2,
+            "max_rel_l2_err": max(rel_l2.values()),
+        }
+        print(
+            f"  Calib {label:32s} (G={G:3d}, {n_steps:3d} steps): "
+            f"step={ms_step:6.3f}+/-{ms_step_std:.4f} ms | total={total_ms:7.2f} ms | "
+            f"VRAM(in-place)={vram_inplace_mib:6.1f} MiB | "
+            f"L2 max={100*row['max_rel_l2_err']:6.2f}% (ax={100*rel_l2['axial']:5.2f}%, body={100*rel_l2['body_diag']:5.2f}%)"
+        )
+        rows.append(row)
+
+    eval_case("Rank-7 (2c+1r, nu=1.00, fp32)", "sep", 128, 1.00, torch.float32)
+    eval_case("Rank-7 (2c+1r, nu=1.00, fp16)", "sep", 128, 1.00, torch.float16)
+    for m_ref, G_f in [(1.0, 128), (2.0, 256), (2.5, 320), (3.0, 384), (3.5, 448), (4.0, 512)]:
+        eval_case(f"25-pt FDTD ({m_ref:.1f}x, G={G_f})", "fdtd25", G_f, 1.0 / math.sqrt(3.0))
+
+    return rows
+
+
+def rerun_calibration_experiments():
+    """Run only the multi-grid FDTD calibration and border-rank precision sweep and update stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    print("\n=== 3-D Border-Rank Precision Sweep (5-term vs 6-term vs 7-term) ===")
+    results["border_rank_precision"] = evaluate_border_rank_precision()
+    print("\n=== Measured Multi-Grid FDTD Resolution-Scaling Calibration ===")
+    results["multigrid_fdtd_calibration"] = run_multigrid_fdtd_calibration(results["propagators"])
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated calibration results in {RESULTS_PATH}")
+
+
 def rerun_hetero_experiment():
     """Run only the heterogeneous sound-speed experiment and update stored results."""
     with open(RESULTS_PATH, encoding="utf-8") as f:
@@ -1597,11 +1830,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU simulation, room test and benchmarks")
     parser.add_argument("--hetero-only", action="store_true", help="rerun only the spatially varying sound-speed experiment")
+    parser.add_argument("--calibration-only", action="store_true", help="rerun only the multi-grid FDTD calibration and border-rank precision sweep")
     args = parser.parse_args()
     if args.gpu_only:
         return rerun_gpu_experiments()
     if args.hetero_only:
         return rerun_hetero_experiment()
+    if args.calibration_only:
+        return rerun_calibration_experiments()
 
     verify_iwb_is_single_real_gaussian()
 
@@ -1647,6 +1883,9 @@ def main():
     gpu_results = run_gpu_experiments(propagators)
     print("\n=== 3-D Spatially Varying Sound-Speed c(x) Experiment ===")
     hetero_lens = run_heterogeneous_lens_experiment(propagators)
+    print("\n=== 3-D Border-Rank Precision Sweep & Multi-Grid FDTD Calibration ===")
+    border_prec = evaluate_border_rank_precision()
+    multigrid_calib = run_multigrid_fdtd_calibration(propagators)
     cpu_bench = benchmark_3d_cpu(G=128, L=6, R=7)
     disp_curves = compute_dispersion_curves(propagators)
 
@@ -1665,6 +1904,8 @@ def main():
                 "propagators": serializable_props,
                 **gpu_results,
                 "heterogeneous_lens": hetero_lens,
+                "border_rank_precision": border_prec,
+                "multigrid_fdtd_calibration": multigrid_calib,
                 "cpu_benchmark_128cubed": cpu_bench,
                 "dispersion_curves": disp_curves,
             },

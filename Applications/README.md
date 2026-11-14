@@ -1,6 +1,6 @@
 # Numerical applications and GPU benchmarks
 
-This directory accompanies Section 5 and Appendix A of [`../paper/main.tex`](../paper/main.tex). All scripts run
+This directory accompanies Section 6 and Appendix B of [`../paper/main.tex`](../paper/main.tex). All scripts run
 through [`../scripts/python`](../scripts/python), which manages an isolated virtual environment in
 `.tmp/venv` and keeps Matplotlib, `uv`, and Triton caches inside `.tmp/cache`.
 
@@ -9,7 +9,7 @@ through [`../scripts/python`](../scripts/python), which manages an isolated virt
 | File | Description |
 |---|---|
 | [`blur_2d.py`](./blur_2d.py) | Minimax 2-D circular disc blur ($\Delta r = 0.2$) across 18 exponential-polynomial families; empirical SVD rank checks; 6-stage `separableChannels` IEEE `float16` conditioning ablation (comparing `GL_R` orthogonalization against magnitude reordering and `float32` outer accumulation without orthogonalization, `--ablation-only`) across 20 random HDR scenes and 3 glint peak levels; direct discrete rank-$R$ optimization vs. sampled continuous profiles, dense $R_{\mathrm{px}} \in [3, 64]$ convergence sweep, and warm-start vs. cold-start POCS trajectories (`--discrete-only`); 1080p RGBA 10-batch CUDA-Event GPU benchmarks against direct $W \times W$ convolution and zero- and clamp-padded `cuFFT`, each checked against a `float64` reference; 14-core CPU benchmarks |
-| [`acoustics_3d.py`](./acoustics_3d.py) | Algebraic identity between Kowalczyk–van Walstijn's 27-point `IWB` stencil and a single real Gaussian ($R = 1$); Brillouin-octant and spherical-shell (232,620-point) Chebyshev LP design + continuous multi-start error refinement of von Neumann-stable 3-D radial wave propagators ($R = 4, 6, 7, 9$, including $\deg P = 1$); $256^3$ broadband spherical wave simulation vs. exact 3-D D'Alembert across 7-pt, 13-pt $O(\Delta x^4, \Delta t^2)$, 27-pt `IWB`, fourth-order 25-pt $O(\Delta x^4, \Delta t^4)$, and periodic `cuFFT` $k$-space propagation; shared-rate `Rank-8` spatially varying sound-speed $c(\mathbf{x})$ dispersion, 1,000-step smooth/jump stability, and $128^3$ acoustic focusing lens refraction (`--hetero-only`); 1,000-step rigid-room Neumann wall energy test; 10-batch GPU benchmarks of the separable, direct $W^3$ and $k$-space steps, each checked against a `float64` step; 14-core CPU benchmarks |
+| [`acoustics_3d.py`](./acoustics_3d.py) | Algebraic identity between Kowalczyk–van Walstijn's 27-point `IWB` stencil and a single real Gaussian ($R = 1$); Brillouin-octant and spherical-shell (232,620-point) Chebyshev LP design + continuous multi-start error refinement of von Neumann-stable 3-D radial wave propagators ($R = 4, 6, 7, 9$, including $\deg P = 1$); $256^3$ broadband spherical wave simulation vs. exact 3-D D'Alembert across 7-pt, 13-pt $O(\Delta x^4, \Delta t^2)$, 27-pt `IWB`, fourth-order 25-pt $O(\Delta x^4, \Delta t^4)$, and periodic `cuFFT` $k$-space propagation; measured multi-grid FDTD resolution-scaling calibration ($128^3$ `Rank-7` vs. $128^3\text{--}512^3$ `25-pt` FDTD) and 3-D border-rank precision sweep (`--calibration-only`); shared-rate `Rank-8` spatially varying sound-speed $c(\mathbf{x})$ dispersion, 1,000-step smooth/jump stability, and $128^3$ acoustic focusing lens refraction (`--hetero-only`); 1,000-step rigid-room Neumann wall energy test; 10-batch GPU benchmarks of the separable, direct $W^3$ and $k$-space steps, each checked against a `float64` step; 14-core CPU benchmarks |
 | [`gpu_kernels.py`](./gpu_kernels.py) | The GPU implementations used by both scripts (see [GPU implementations](#gpu-implementations)) |
 | [`generate_figures.py`](./generate_figures.py) | Generates [`../paper/fig_overview_pipeline.pdf`](../paper/fig_overview_pipeline.pdf), [`../paper/fig_blur_2d.pdf`](../paper/fig_blur_2d.pdf), [`../paper/fig_discrete_vs_continuous.pdf`](../paper/fig_discrete_vs_continuous.pdf), [`../paper/fig_discrete_convergence.pdf`](../paper/fig_discrete_convergence.pdf), [`../paper/fig_acoustics_3d.pdf`](../paper/fig_acoustics_3d.pdf), and [`../paper/fig_acoustics_hetero.pdf`](../paper/fig_acoustics_hetero.pdf) from the JSON artifacts |
 | [`results_blur_2d.json`](./results_blur_2d.json), [`results_acoustics_3d.json`](./results_acoustics_3d.json) | Saved optimization parameters, error metrics, waveforms, and NVIDIA GeForce RTX 4070 Ti Super benchmark timings with per-method errors and tuned launch parameters (`gpu_benchmark_info` describes the test data and methods) |
@@ -33,9 +33,9 @@ recording our RTX 4070 Ti Super reference run).
 
 `scripts/python Applications/blur_2d.py --gpu-only` (`--discrete-only`, `--ablation-only`) reruns only the GPU throughput
 benchmark (or discrete-vs.-continuous convergence / warm-start analysis, or 6-stage `float16` conditioning ablation) from the stored kernel families,
-and `scripts/python Applications/acoustics_3d.py --gpu-only` (`--hetero-only`) reruns only the GPU wave
-simulation, room test and throughput benchmarks (or spatially varying $c(\mathbf{x})$ experiment) from the
-stored propagators; all five flags update the JSON files in place. The first run compiles and tunes the Triton kernels (about half an hour for the 2-D benchmark); later
+and `scripts/python Applications/acoustics_3d.py --gpu-only` (`--hetero-only`, `--calibration-only`) reruns only the GPU wave
+simulation, room test and throughput benchmarks (or spatially varying $c(\mathbf{x})$ experiment, or multi-grid FDTD calibration and border-rank precision sweep) from the
+stored propagators; all six flags update the JSON files in place. The first run compiles and tunes the Triton kernels (about half an hour for the 2-D benchmark); later
 runs reuse `.tmp/cache/triton` and take a few minutes.
 
 ## GPU implementations

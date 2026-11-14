@@ -129608,5 +129608,212 @@
         ]
       ]
     }
-  }
+  },
+  "border_rank_precision": {
+    "exact_7term_rel_linf_err": {
+      "float16": 0.002760284479431871,
+      "float32": 4.2661890451979324e-07,
+      "float64": 1.7556523701112434e-15
+    },
+    "border_min_over_h": {
+      "6term_gaussian_border": {
+        "float16": {
+          "best_h": 0.019386526359522097,
+          "min_rel_linf_err": 0.048265479583420916
+        },
+        "float32": {
+          "best_h": 0.0001966753809283339,
+          "min_rel_linf_err": 0.000703254461854112
+        },
+        "float64": {
+          "best_h": 7.829787941891037e-09,
+          "min_rel_linf_err": 2.928151489542061e-08
+        }
+      },
+      "5term_nongaussian_border": {
+        "float16": {
+          "best_h": 0.15179239032493855,
+          "min_rel_linf_err": 0.2036475648546959
+        },
+        "float32": {
+          "best_h": 0.014125375446227554,
+          "min_rel_linf_err": 0.016161613312850175
+        },
+        "float64": {
+          "best_h": 0.00012232071190499324,
+          "min_rel_linf_err": 0.00014202588768614673
+        }
+      }
+    }
+  },
+  "multigrid_fdtd_calibration": [
+    {
+      "label": "Rank-7 (2c+1r, nu=1.00, fp32)",
+      "G": 128,
+      "refinement_m": 1.0,
+      "dx": 1.0,
+      "nu": 1.0,
+      "n_steps": 42,
+      "ms_per_step": 0.18802687644958496,
+      "ms_per_step_std": 0.0021795632951634087,
+      "total_sim_ms": 7.897128810882569,
+      "total_sim_ms_std": 0.09154165839686317,
+      "field_mib_inplace": 16.0,
+      "scratch_mib": 14.0,
+      "total_vram_inplace_mib": 30.0,
+      "rel_l2_err": {
+        "axial": 0.013311558976781648,
+        "face_diag": 0.015876408401354482,
+        "body_diag": 0.016838714306858103
+      },
+      "max_rel_l2_err": 0.016838714306858103
+    },
+    {
+      "label": "Rank-7 (2c+1r, nu=1.00, fp16)",
+      "G": 128,
+      "refinement_m": 1.0,
+      "dx": 1.0,
+      "nu": 1.0,
+      "n_steps": 42,
+      "ms_per_step": 0.15351807912190757,
+      "ms_per_step_std": 0.0002248029380445725,
+      "total_sim_ms": 6.447759323120118,
+      "total_sim_ms_std": 0.009441723397872045,
+      "field_mib_inplace": 16.0,
+      "scratch_mib": 7.0,
+      "total_vram_inplace_mib": 23.0,
+      "rel_l2_err": {
+        "axial": 0.02782639301363857,
+        "face_diag": 0.01686773051908209,
+        "body_diag": 0.01597247086023655
+      },
+      "max_rel_l2_err": 0.02782639301363857
+    },
+    {
+      "label": "25-pt FDTD (1.0x, G=128)",
+      "G": 128,
+      "refinement_m": 1.0,
+      "dx": 1.0,
+      "nu": 0.5773502691896258,
+      "n_steps": 73,
+      "ms_per_step": 0.0399837867418925,
+      "ms_per_step_std": 0.00046194319394778327,
+      "total_sim_ms": 2.9188164321581525,
+      "total_sim_ms_std": 0.03372185315818818,
+      "field_mib_inplace": 16.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 16.0,
+      "rel_l2_err": {
+        "axial": 0.6509009805014511,
+        "face_diag": 0.23268158024769023,
+        "body_diag": 0.07537991174273195
+      },
+      "max_rel_l2_err": 0.6509009805014511
+    },
+    {
+      "label": "25-pt FDTD (2.0x, G=256)",
+      "G": 256,
+      "refinement_m": 2.0,
+      "dx": 0.5,
+      "nu": 0.5773502691896258,
+      "n_steps": 145,
+      "ms_per_step": 0.32422570228576664,
+      "ms_per_step_std": 0.0002809205427814563,
+      "total_sim_ms": 47.01272683143616,
+      "total_sim_ms_std": 0.04073347870331117,
+      "field_mib_inplace": 128.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 128.0,
+      "rel_l2_err": {
+        "axial": 0.07833804321523935,
+        "face_diag": 0.011142483764347101,
+        "body_diag": 0.0034581329590418083
+      },
+      "max_rel_l2_err": 0.07833804321523935
+    },
+    {
+      "label": "25-pt FDTD (2.5x, G=320)",
+      "G": 320,
+      "refinement_m": 2.5,
+      "dx": 0.4,
+      "nu": 0.5773502691896258,
+      "n_steps": 182,
+      "ms_per_step": 0.7507583916187286,
+      "ms_per_step_std": 0.0025263898798172117,
+      "total_sim_ms": 136.63802727460862,
+      "total_sim_ms_std": 0.45980295812673255,
+      "field_mib_inplace": 250.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 250.0,
+      "rel_l2_err": {
+        "axial": 0.03281390978332033,
+        "face_diag": 0.0045403109712240704,
+        "body_diag": 0.001411626680524593
+      },
+      "max_rel_l2_err": 0.03281390978332033
+    },
+    {
+      "label": "25-pt FDTD (3.0x, G=384)",
+      "G": 384,
+      "refinement_m": 3.0,
+      "dx": 0.3333333333333333,
+      "nu": 0.5773502691896258,
+      "n_steps": 218,
+      "ms_per_step": 1.1215360045433045,
+      "ms_per_step_std": 0.0004902064128631398,
+      "total_sim_ms": 244.49484899044037,
+      "total_sim_ms_std": 0.10686499800416448,
+      "field_mib_inplace": 432.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 432.0,
+      "rel_l2_err": {
+        "axial": 0.01599320124504042,
+        "face_diag": 0.002190053595172995,
+        "body_diag": 0.0006821844592015901
+      },
+      "max_rel_l2_err": 0.01599320124504042
+    },
+    {
+      "label": "25-pt FDTD (3.5x, G=448)",
+      "G": 448,
+      "refinement_m": 3.5,
+      "dx": 0.2857142857142857,
+      "nu": 0.5773502691896258,
+      "n_steps": 255,
+      "ms_per_step": 1.7771520137786865,
+      "ms_per_step_std": 0.0027306514483376623,
+      "total_sim_ms": 453.17376351356506,
+      "total_sim_ms_std": 0.6963161193261039,
+      "field_mib_inplace": 686.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 686.0,
+      "rel_l2_err": {
+        "axial": 0.008691039140492554,
+        "face_diag": 0.0011883904845469738,
+        "body_diag": 0.0003751510607244971
+      },
+      "max_rel_l2_err": 0.008691039140492554
+    },
+    {
+      "label": "25-pt FDTD (4.0x, G=512)",
+      "G": 512,
+      "refinement_m": 4.0,
+      "dx": 0.25,
+      "nu": 0.5773502691896258,
+      "n_steps": 291,
+      "ms_per_step": 2.6198271751403808,
+      "ms_per_step_std": 0.0007541316147389608,
+      "total_sim_ms": 762.3697079658508,
+      "total_sim_ms_std": 0.21945229988903758,
+      "field_mib_inplace": 1024.0,
+      "scratch_mib": 0.0,
+      "total_vram_inplace_mib": 1024.0,
+      "rel_l2_err": {
+        "axial": 0.005121338021009638,
+        "face_diag": 0.0007074714895118766,
+        "body_diag": 0.00023790976776214733
+      },
+      "max_rel_l2_err": 0.005121338021009638
+    }
+  ]
 }
