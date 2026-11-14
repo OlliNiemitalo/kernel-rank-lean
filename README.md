@@ -74,13 +74,15 @@ and any dimension `d ≥ 2`:
    exact real rank `3 d - 2`, and radial multi-Gaussian border rank at most `2 d`.
 
 5. **Exact complex/3-D border ranks and universal approximation ([Approximation.lean](KernelRankLean/Approximation.lean)):**
-   * **Exact complex border rank (`sum_natDegree_add_one_le_of_tendsto_radial_complex`,
-     `exists_rank_le_sum_natDegree_add_one_tendstoUniformlyOn_radial_complex`) and 2-D slice
+   * **Exact complex and purely real-rate border rank (`sum_natDegree_add_one_le_of_tendsto_radial_complex`,
+     `exists_rank_le_sum_natDegree_add_one_tendstoUniformlyOn_radial_complex`,
+     `borderTotalCost_le_of_tendsto_radial_real_profile`) and 2-D slice
      lower bound (`separableRank_fin2_le_of_tendsto`, `totalCost_le_of_tendsto_radial_profile`):**
      two-variable separable rank is closed under pointwise convergence over any Hausdorff
      topological field, giving exact pointwise and compact-open complex border rank
-     `∑ μ ∈ S, (deg P_μ + 1)` in all dimensions `d ≥ 2` and real border-rank lower bound
-     `totalCost cs`.
+     `∑ μ ∈ S, (deg P_μ + 1)` in all dimensions `d ≥ 2`, real border-rank lower bound
+     `totalCost cs`, and exact real border rank `borderTotalCost d cs = ∑_c (deg P_c + 1)` whenever
+     every component has a real rate (`Im λ_c = 0`, arbitrary degrees).
    * **Strict non-sharpness of `borderTotalCost` over `ℝ` in `d = 3`
      (`not_exists_rank_le_two_tendsto_radial_cos`,
      `not_exists_rank_le_four_tendsto_radial_sq_mul_cos`,
@@ -276,7 +278,8 @@ size, not mathematical complexity.
 | [`9722ff5`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/9722ff5b2e2f788874a99378165af2206f0d7d42) | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
 | [`1094bf1`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/1094bf1b76f37fb62e78bc35461b50f50230a81a) | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
 | [`94a5b4a`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/94a5b4a2696504e58148d7e823879d247f1557a8) | Prove general `d`-D multi-Gaussian border-rank bound `borderTotalCost d cs` for all radial exponential-polynomial representations (`Defs.lean`, `Main.lean`) | 5,750 | 5,432 | +172 |
-| This revision | Prove exact complex border rank, 3-D real border rank `5 < B_3 = 6` on `‖x‖² cos(‖x‖²)`, and equal-width harmonic Gaussian universal approximation (`Approximation.lean`) | 6,910 | 6,563 | +1,160 |
+| [`67bee46`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/67bee46bb180f211bf3ac776f685bc7d8bfb8c83) | Prove exact complex border rank, 3-D real border rank `5 < B_3 = 6` on `‖x‖² cos(‖x‖²)`, and equal-width harmonic Gaussian universal approximation (`Approximation.lean`) | 6,910 | 6,563 | +1,160 |
+| This revision | Prove exact real border-rank sharpness `borderTotalCost d cs = totalCost cs` across all purely real-rate representations of arbitrary degree (`Approximation.lean`) | 6,935 | 6,586 | +25 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25
@@ -305,12 +308,14 @@ exact `d`-way real radial rank `multiTotalCost d cs` for arbitrary polynomial de
 `d ≥ 2` (5,324 physical lines, 5,021 nonblank). `1094bf1` adds the exact-vs.-border rank
 separation on `‖x‖² cos(‖x‖²)` (5,578 physical lines, 5,267 nonblank), `94a5b4a` generalizes
 the multi-Gaussian border-rank bound `borderTotalCost d cs` to every list of well-formed
-components (5,750 physical lines, 5,432 nonblank), and this revision adds
-[Approximation.lean](KernelRankLean/Approximation.lean) (1,159 physical lines), establishing
-2-D pointwise border-rank closure, exact complex border rank in all dimensions, exact 3-D real
-border rank `5 < borderTotalCost 3 = 6` on `‖x‖² cos(‖x‖²)`, and uniform approximation on `ℝ^d`
-by equal-width harmonic complex Gaussians, bringing `KernelRankLean` to **6,910 physical lines
-and 6,563 nonblank lines** (+1,160 physical lines and +1,131 nonblank lines over `94a5b4a`).
+components (5,750 physical lines, 5,432 nonblank), `67bee46` adds
+[Approximation.lean](KernelRankLean/Approximation.lean) (6,910 physical lines, 6,563 nonblank) for
+2-D pointwise border-rank closure, exact complex border rank, exact 3-D real border rank
+`5 < borderTotalCost 3 = 6` on `‖x‖² cos(‖x‖²)`, and uniform approximation on `ℝ^d` by equal-width
+harmonic complex Gaussians, and this revision adds all-degree real-rate border-rank sharpness
+(`borderTotalCost_le_of_tendsto_radial_real_profile`), bringing `KernelRankLean` to **6,935
+physical lines and 6,586 nonblank lines** (+25 physical lines and +23 nonblank lines over
+`67bee46`).
 
 ## Alternative proofs of the semigroup step
 

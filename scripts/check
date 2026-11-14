@@ -34,6 +34,8 @@ lean_theorems=(
   KernelRank.exists_rank_le_two_mul_tendstoUniformlyOn_radial_sq_mul_cos
   KernelRank.separableRank_fin2_le_of_tendsto
   KernelRank.totalCost_le_of_tendsto_radial_profile
+  KernelRank.borderTotalCost_eq_totalCost_of_forall_im_eq_zero
+  KernelRank.borderTotalCost_le_of_tendsto_radial_real_profile
   KernelRank.sum_natDegree_add_one_le_of_tendsto_radial_complex
   KernelRank.exists_rank_le_sum_natDegree_add_one_tendstoUniformlyOn_radial_complex
   KernelRank.not_exists_rank_le_two_tendsto_radial_cos

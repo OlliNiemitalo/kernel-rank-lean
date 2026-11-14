@@ -230,6 +230,31 @@ theorem totalCost_le_of_tendsto_radial_profile {d : ℕ} (hd : 2 ≤ d)
   rw [hpad, separableRank_radial_two_profile hcs] at hle
   exact_mod_cast hle
 
+/-- **Sharpness of `borderTotalCost` for all purely real-rate representations (`d ≥ 2`).**
+When every component of `cs` has a real rate (`c.rate.im = 0`, of arbitrary polynomial degree),
+`borderTotalCost d cs` coincides with the 2-D rank `totalCost cs`. -/
+theorem borderTotalCost_eq_totalCost_of_forall_im_eq_zero (d : ℕ) {cs : List Component}
+    (him : ∀ c ∈ cs, c.rate.im = 0) :
+    borderTotalCost d cs = totalCost cs := by
+  unfold borderTotalCost totalCost
+  congr 1
+  refine List.map_congr_left fun c hc => ?_
+  simp [Component.borderCost, Component.cost, Component.multiplicity, him c hc]
+
+/-- **Exact `d`-D real border-rank lower bound for purely real-rate representations (`d ≥ 2`).**
+Combined with `exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`, for every
+representation `cs` whose rates are all real (arbitrary polynomial degrees `deg P ≥ 0`), its
+pointwise and compact-open real border rank in dimension `d ≥ 2` equals `borderTotalCost d cs`
+(`= ∑_c (deg P_c + 1)`). -/
+theorem borderTotalCost_le_of_tendsto_radial_real_profile {d : ℕ} (hd : 2 ≤ d)
+    {cs : List Component} (hcs : IsRepresentation cs) (him : ∀ c ∈ cs, c.rate.im = 0)
+    {ι : Type*} {l : Filter ι} [l.NeBot] {F : ι → (Fin d → ℝ) → ℝ} {r : ℕ}
+    (hrank : ∀ᶠ i in l, separableRank (F i) ≤ (r : ℕ))
+    (htend : ∀ x, Filter.Tendsto (fun i => F i x) l (𝓝 (profile cs (∑ j, x j ^ 2)))) :
+    borderTotalCost d cs ≤ r := by
+  rw [borderTotalCost_eq_totalCost_of_forall_im_eq_zero d him]
+  exact totalCost_le_of_tendsto_radial_profile hd hcs hrank htend
+
 /-- **Exact `d`-D complex border-rank lower bound (`d ≥ 2`).** Every family `F i` of complex
 kernels on `ℝ^d` converging pointwise along a nontrivial filter to
 `x ↦ ∑ μ ∈ S, expPoly (P μ) μ (∑ j, x j ^ 2)` (with `P μ ≠ 0` for `μ ∈ S`) eventually cannot have
