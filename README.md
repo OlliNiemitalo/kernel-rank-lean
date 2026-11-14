@@ -279,7 +279,7 @@ size, not mathematical complexity.
 | [`1094bf1`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/1094bf1b76f37fb62e78bc35461b50f50230a81a) | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
 | [`94a5b4a`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/94a5b4a2696504e58148d7e823879d247f1557a8) | Prove general `d`-D multi-Gaussian border-rank bound `borderTotalCost d cs` for all radial exponential-polynomial representations (`Defs.lean`, `Main.lean`) | 5,750 | 5,432 | +172 |
 | [`67bee46`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/67bee46bb180f211bf3ac776f685bc7d8bfb8c83) | Prove exact complex border rank, 3-D real border rank `5 < B_3 = 6` on `‖x‖² cos(‖x‖²)`, and equal-width harmonic Gaussian universal approximation (`Approximation.lean`) | 6,910 | 6,563 | +1,160 |
-| This revision | Prove exact real border-rank sharpness `borderTotalCost d cs = totalCost cs` across all purely real-rate representations of arbitrary degree (`Approximation.lean`) | 6,935 | 6,586 | +25 |
+| [`f9b39e7`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/f9b39e7d48a690ad850100af03f52c3e26b11c20) | Prove exact real border-rank sharpness `borderTotalCost d cs = totalCost cs` across all purely real-rate representations of arbitrary degree (`Approximation.lean`) | 6,935 | 6,586 | +25 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25

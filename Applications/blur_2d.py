@@ -377,9 +377,14 @@ def make_bokeh_test_image(H_img: int = 512, W_img: int = 512, seed: int = 7, pea
 
 def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, peak_levels=(8.0, 48.0, 256.0)):
     """
-    4-stage float16 sRGB bokeh conditioning ablation isolating each mechanism in `separableChannels`:
+    6-stage float16 sRGB bokeh conditioning ablation isolating each mechanism in `separableChannels`
+    and comparing against alternative non-orthogonalized stabilization techniques:
       Stage 1 (unbalanced): raw per-component channels with weights on V (no intra-term norm balance);
       Stage 2 (term_balanced): per-component channels with ||h_n||_2 == ||v_n||_2 (no GL_R rotation);
+      Stage 2b (term_balanced_asc): non-orthogonalized pair-balanced channels reordered SMALLEST
+        ||h_n||_2 * ||v_n||_2 first (reordering by magnitude without orthogonalization);
+      Stage 2c (term_balanced_fp32acc): non-orthogonalized pair-balanced channels with float16 1-D pass
+        intermediates summed in float32 (isolating intra-channel intermediate rounding from outer sum);
       Stage 3 (orth_desc): GL_R(R) orthogonalized rowSpan channels accumulated LARGEST-|e_n| first;
       Stage 4 (orth_asc): GL_R(R) orthogonalized rowSpan channels accumulated SMALLEST-|e_n| first.
     Evaluated across `n_seeds` random 512x512 HDR scenes (peak=48) and across `peak_levels`.
@@ -402,19 +407,24 @@ def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, 
         comps = fam["components"]
         H_unb, V_unb = unbalanced_per_component_channels_1d(x_grid, comps)
         H_bal, V_bal = balance_channel_pairs_1d(H_unb, V_unb)
+        bal_norms = np.linalg.norm(H_bal, axis=1) * np.linalg.norm(V_bal, axis=1)
+        asc_perm = np.argsort(bal_norms, kind="mergesort")
+        H_bal_asc, V_bal_asc = H_bal[asc_perm].copy(), V_bal[asc_perm].copy()
         H_asc, V_asc = orthogonal_rowspan_channels_1d(H_bal, V_bal)
         H_desc, V_desc = H_asc[::-1].copy(), V_asc[::-1].copy()
 
         K_ex = H_bal.T @ V_bal
         k_peak = float(np.max(np.abs(K_ex)))
         stages = [
-            ("unbalanced", H_unb, V_unb),
-            ("term_balanced", H_bal, V_bal),
-            ("orth_desc", H_desc, V_desc),
-            ("orth_asc", H_asc, V_asc),
+            ("unbalanced", H_unb, V_unb, False),
+            ("term_balanced", H_bal, V_bal, False),
+            ("term_balanced_asc", H_bal_asc, V_bal_asc, False),
+            ("term_balanced_fp32acc", H_bal_asc, V_bal_asc, True),
+            ("orth_desc", H_desc, V_desc, False),
+            ("orth_asc", H_asc, V_asc, False),
         ]
         entry = {"label": lbl, "rank_R": fam["rank_2d"], "stages_20scenes_peak48": {}, "peak_sweep_seed7": {}}
-        for st_name, Hf, Vf in stages:
+        for st_name, Hf, Vf, fp32_acc in stages:
             kappa_inf = float(np.sum(np.max(np.abs(Hf), axis=1) * np.max(np.abs(Vf), axis=1)) / k_peak)
             kappa_l2 = float(np.sum(np.linalg.norm(Hf, axis=1) * np.linalg.norm(Vf, axis=1)) / np.linalg.norm(K_ex, ord="nuc"))
             h_over_v = float(np.max(np.maximum(np.linalg.norm(Hf, axis=1) / np.maximum(np.linalg.norm(Vf, axis=1), 1e-30),
@@ -422,7 +432,7 @@ def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, 
             max_srgb_list, rmse_srgb_list, max_lin_list = [], [], []
             n_overflow = 0
             for sc in scenes_48:
-                rm, mx, ln = simulate_separable_blur_precision(sc, Hf, Vf, torch.float16)
+                rm, mx, ln = simulate_separable_blur_precision(sc, Hf, Vf, torch.float16, fp32_accum=fp32_acc)
                 if not math.isfinite(mx):
                     n_overflow += 1
                 else:
@@ -440,14 +450,15 @@ def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, 
                 "srgb_rmse_mean": float(np.mean(rmse_srgb_list)) if rmse_srgb_list else float("inf"),
                 "srgb_rmse_std": float(np.std(rmse_srgb_list, ddof=1)) if len(rmse_srgb_list) > 1 else 0.0,
                 "lin_max_mean": float(np.mean(max_lin_list)) if max_lin_list else float("inf"),
+                "lin_max_std": float(np.std(max_lin_list, ddof=1)) if len(max_lin_list) > 1 else 0.0,
             }
 
         # HDR glint peak sweep at seed=7
         for pk in peak_levels:
             sc_pk = make_bokeh_test_image(512, 512, seed=7, peak_hdr=pk)
             pk_dict = {}
-            for st_name, Hf, Vf in stages:
-                rm, mx, ln = simulate_separable_blur_precision(sc_pk, Hf, Vf, torch.float16)
+            for st_name, Hf, Vf, fp32_acc in stages:
+                rm, mx, ln = simulate_separable_blur_precision(sc_pk, Hf, Vf, torch.float16, fp32_accum=fp32_acc)
                 pk_dict[st_name] = {
                     "srgb_max_255": 255.0 * mx if math.isfinite(mx) else "overflow",
                     "lin_max_255": 255.0 * ln if math.isfinite(ln) else "overflow",
@@ -458,7 +469,9 @@ def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, 
         print(
             f"Ablation {lbl:22s} (R={fam['rank_2d']:2d}): "
             f"Unbal={s48['unbalanced']['srgb_max_mean']:7.2f}+/-{s48['unbalanced']['srgb_max_std']:4.2f} (ovf={s48['unbalanced']['n_overflow']}) | "
-            f"TermBal={s48['term_balanced']['srgb_max_mean']:6.2f}+/-{s48['term_balanced']['srgb_max_std']:4.2f} | "
+            f"Bal={s48['term_balanced']['srgb_max_mean']:6.2f}+/-{s48['term_balanced']['srgb_max_std']:4.2f} | "
+            f"BalAsc={s48['term_balanced_asc']['srgb_max_mean']:6.2f}+/-{s48['term_balanced_asc']['srgb_max_std']:4.2f} | "
+            f"BalFp32Acc={s48['term_balanced_fp32acc']['srgb_max_mean']:6.2f}+/-{s48['term_balanced_fp32acc']['srgb_max_std']:4.2f} | "
             f"OrthDesc={s48['orth_desc']['srgb_max_mean']:5.2f}+/-{s48['orth_desc']['srgb_max_std']:4.2f} | "
             f"OrthAsc={s48['orth_asc']['srgb_max_mean']:5.2f}+/-{s48['orth_asc']['srgb_max_std']:4.2f}"
         )
@@ -466,10 +479,12 @@ def evaluate_conditioning_ablation(families, R_px: int = 25, n_seeds: int = 20, 
     return ablation_rows
 
 
-def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac: np.ndarray, dtype):
+def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac: np.ndarray, dtype, fp32_accum: bool = False):
     """
     Simulate 2-D separable blur in scene-linear light and measure 8-bit sRGB display error
     |sRGB(clip(acc_lp, 0, 1)) - sRGB(clip(acc_fp64, 0, 1))| (plus linear-light max error).
+    When `fp32_accum=True`, each 1-D horizontal intermediate and per-channel vertical output is
+    stored in `dtype` (e.g. float16), while the outer sum across channels is accumulated in float32.
     """
     ksum = float(np.sum(H_fac @ np.ones(H_fac.shape[1]) * (V_fac @ np.ones(V_fac.shape[1]))))
     s_norm = 1.0 / math.sqrt(abs(ksum))
@@ -488,14 +503,15 @@ def simulate_separable_blur_precision(img: np.ndarray, H_fac: np.ndarray, V_fac:
         m64 = F.conv2d(F.pad(img_t, (L, L, 0, 0), mode="replicate"), hx)
         acc64 = acc64 + F.conv2d(F.pad(m64, (0, 0, L, L), mode="replicate"), vy)
 
-    # Target precision (e.g. torch.float16 intermediate + accumulator)
+    # Target precision (e.g. torch.float16 intermediate; float16 or float32 outer accumulator)
     img_lp = img_t.to(dtype)
-    acc_lp = torch.zeros_like(img_lp)
+    acc_lp = torch.zeros_like(img_lp, dtype=torch.float32 if fp32_accum else dtype)
     for n in range(Hn.shape[0]):
         hx = torch.tensor(Hn[n][None, None, None, :], device=device, dtype=dtype)
         vy = torch.tensor(Vn[n][None, None, :, None], device=device, dtype=dtype)
         m_lp = F.conv2d(F.pad(img_lp, (L, L, 0, 0), mode="replicate"), hx)
-        acc_lp = acc_lp + F.conv2d(F.pad(m_lp, (0, 0, L, L), mode="replicate"), vy)
+        term_lp = F.conv2d(F.pad(m_lp, (0, 0, L, L), mode="replicate"), vy)
+        acc_lp = acc_lp + (term_lp.to(torch.float32) if fp32_accum else term_lp)
 
     a64 = acc64.cpu().numpy()[0, 0]
     alp = acc_lp.to(torch.float64).cpu().numpy()[0, 0]
@@ -1057,15 +1073,31 @@ def rerun_discrete_vs_continuous():
     print(f"\nUpdated discrete_vs_continuous in {RESULTS_PATH}")
 
 
+def rerun_conditioning_ablation():
+    """Rerun only the 6-stage float16 conditioning ablation and update stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    print("\n=== 6-Stage separableChannels Conditioning Ablation (20 HDR scenes & peak sweep) ===")
+    results["conditioning_ablation"] = evaluate_conditioning_ablation(
+        results["families"], R_px=25, n_seeds=20, peak_levels=(8.0, 48.0, 256.0)
+    )
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated conditioning_ablation in {RESULTS_PATH}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU throughput benchmark")
     parser.add_argument("--discrete-only", action="store_true", help="rerun only the discrete-vs-continuous analysis")
+    parser.add_argument("--ablation-only", action="store_true", help="rerun only the float16 conditioning ablation")
     args = parser.parse_args()
     if args.gpu_only:
         return rerun_gpu_benchmark()
     if args.discrete_only:
         return rerun_discrete_vs_continuous()
+    if args.ablation_only:
+        return rerun_conditioning_ablation()
 
     s2, tgt2, _, _ = make_disc_grid(tau=0.2, dim_corner=2, n_pass=1000, n_stop=1000)
     s3, tgt3, _, _ = make_disc_grid(tau=0.2, dim_corner=3, n_pass=1000, n_stop=1000)
