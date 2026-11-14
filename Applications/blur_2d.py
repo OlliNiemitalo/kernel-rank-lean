@@ -625,6 +625,117 @@ def measure_kernel_anisotropy(K: np.ndarray, R_px: int, tau: float = 0.2):
     }
 
 
+def trace_discrete_warmstart(R_px: int, R_rank: int, K_cont: np.ndarray, tau: float = 0.2,
+                             checkpoints=(0, 2, 5, 10, 20, 40, 80, 150, 300, 500)):
+    """
+    Compare warm-starting discrete minimax from sampled continuous complex Gaussians (`K_cont`)
+    against cold-starting from raised-cosine SVD, hard-disc SVD, and random symmetric rank-R
+    matrices (5 seeds), tracking both unconstrained ripple and joint shell-isotropic minimax error
+    max(pass/stopband ripple, max_m |K[m] - shell_avg(K)[m]|) versus SVD iteration count.
+    """
+    L = math.ceil((1.0 + tau) * R_px)
+    m = np.arange(-L, L + 1, dtype=np.float64)
+    mx, my = np.meshgrid(m, m, indexing="ij")
+    n2 = (mx**2 + my**2).astype(np.int64)
+    r = np.sqrt(n2) / R_px
+    mask_ps = (r <= 1.0) | (r >= 1.0 + tau)
+    tgt = (r <= 1.0).astype(np.float64)
+
+    K_rc = np.zeros_like(r)
+    K_rc[r <= 1.0] = 1.0
+    m_tr = (r > 1.0) & (r < 1.0 + tau)
+    K_rc[m_tr] = 0.5 * (1.0 + np.cos(math.pi * (r[m_tr] - 1.0) / tau))
+
+    uniq_n2, inv_n2 = np.unique(n2.ravel(), return_inverse=True)
+    counts_n2 = np.bincount(inv_n2)
+
+    def sym_svd(A: np.ndarray) -> np.ndarray:
+        A = 0.5 * (A + A.T)
+        A = 0.25 * (A + A[::-1, :] + A[:, ::-1] + A[::-1, ::-1])
+        U, s, Vt = np.linalg.svd(A, full_matrices=False)
+        s[R_rank:] = 0.0
+        return (U * s) @ Vt
+
+    def shell_proj(A: np.ndarray) -> np.ndarray:
+        avg = np.bincount(inv_n2, weights=A.ravel()) / counts_n2
+        return avg[inv_n2].reshape(A.shape)
+
+    def run_single(K_init: np.ndarray, shell_iso: bool):
+        max_k = max(checkpoints)
+        M = sym_svd(K_init)
+        best_obj = float("inf")
+        M_best = M.copy()
+        out = {}
+
+        def obj_val(A: np.ndarray):
+            rip = float(np.max(np.abs(A[mask_ps] - tgt[mask_ps])))
+            if not shell_iso:
+                return rip, rip, 0.0
+            an = float(np.max(np.abs(A - shell_proj(A))))
+            return max(rip, an), rip, an
+
+        v0, r0, a0 = obj_val(M)
+        best_obj = v0
+        best_r, best_a = r0, a0
+        if 0 in checkpoints:
+            out[0] = {"obj": best_obj, "ripple": best_r, "aniso_dev": best_a}
+        lvl = 0.92 * best_obj
+        stall = 0
+        for k in range(1, max_k + 1):
+            if shell_iso:
+                M = shell_proj(M)
+            else:
+                M = 0.5 * (M + M.T)
+                M = 0.25 * (M + M[::-1, :] + M[:, ::-1] + M[::-1, ::-1])
+            M[mask_ps] = tgt[mask_ps] + np.clip(M[mask_ps] - tgt[mask_ps], -lvl, lvl)
+            M = sym_svd(M)
+            vk, rk, ak = obj_val(M)
+            if vk < best_obj:
+                best_obj, best_r, best_a = vk, rk, ak
+                M_best = M.copy()
+                lvl = 0.94 * best_obj
+                stall = 0
+            else:
+                stall += 1
+                if stall >= 35:
+                    lvl = 0.5 * (lvl + best_obj)
+                    M = M_best.copy()
+                    stall = 0
+            if k in checkpoints:
+                out[k] = {"obj": best_obj, "ripple": best_r, "aniso_dev": best_a}
+        return [out[k] for k in checkpoints]
+
+    K_svd_rc = sym_svd(K_rc)
+    K_svd_hard = sym_svd(tgt)
+    rand_seeds = []
+    for sd in range(5):
+        rng = np.random.default_rng(100 + sd)
+        A_h = rng.normal(size=(R_rank, L + 1))
+        A_f = np.concatenate([A_h[:, :0:-1], A_h], axis=1)
+        Kr = A_f.T @ A_f
+        Kr *= np.sum(tgt) / max(abs(np.sum(Kr)), 1e-6)
+        rand_seeds.append(Kr)
+
+    res = {"radius_px": R_px, "rank_R": R_rank, "checkpoints": list(checkpoints)}
+    for mode_key, sh_flag in [("shell_iso", True), ("unconstrained", False)]:
+        rand_runs = [run_single(Kr, sh_flag) for Kr in rand_seeds]
+        rand_avg = [
+            {
+                "obj": float(np.mean([rr[i]["obj"] for rr in rand_runs])),
+                "ripple": float(np.mean([rr[i]["ripple"] for rr in rand_runs])),
+                "aniso_dev": float(np.mean([rr[i]["aniso_dev"] for rr in rand_runs])),
+            }
+            for i in range(len(checkpoints))
+        ]
+        res[mode_key] = {
+            "warm_cont": run_single(K_cont, sh_flag),
+            "cold_svd_rc": run_single(K_svd_rc, sh_flag),
+            "cold_svd_hard": run_single(K_svd_hard, sh_flag),
+            "cold_random": rand_avg,
+        }
+    return res
+
+
 def evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2, 4, 8, 12)):
     """Compare sampled continuous Gaussians vs direct SVD, unconstrained discrete minimax, and shell-isotropic minimax."""
     rank_to_lbl = {2: "1c (Gaussian)", 4: "2c (Gaussian)", 8: "4c (Gaussian)", 12: "6c (Gaussian)"}
@@ -656,8 +767,9 @@ def evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2
             rows.append(row)
             print(
                 f"DiscVsCont R_px={R_px:2d} (L+1={L+1:2d}), R={R_rank:2d} | "
-                f"Cont rip={m_cont['ripple']:.4f} | SVD rip={m_svd['ripple']:.4f} (aniso={m_svd['shell_aniso']:.3f}) | "
-                f"Uncon rip={m_uncon['ripple']:.4f} (aniso={m_uncon['shell_aniso']:.3f}) | Iso rip={m_iso['ripple']:.4f}"
+                f"Cont rip={m_cont['ripple']:.5f} | SVD rip={m_svd['ripple']:.5f} (aniso={m_svd['shell_aniso']:.5f}) | "
+                f"Uncon rip={m_uncon['ripple']:.5f} (aniso={m_uncon['shell_aniso']:.5f}) | "
+                f"Iso rip={m_iso['ripple']:.5f} (aniso={m_iso['shell_aniso']:.5f})"
             )
             if R_rank == 4 and R_px in (6, 25):
                 saved_kernels[f"Rpx{R_px}_R4"] = {
@@ -666,7 +778,64 @@ def evaluate_discrete_vs_continuous(families, radii=(3, 6, 12, 25, 64), ranks=(2
                     "disc_uncon": K_uncon.tolist(),
                     "disc_iso": K_iso.tolist(),
                 }
-    return {"summary": rows, "kernels_R4": saved_kernels}
+
+    # Dense radius convergence sweep R_px in {3..64} (taking best of warm & raised-cosine seeds at small R_px)
+    conv_radii = (3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 36, 48, 64)
+    conv_rows = []
+    for R_px in conv_radii:
+        L = math.ceil(1.2 * R_px)
+        x = np.arange(-L, L + 1, dtype=np.float64) / R_px
+        r2 = x[:, None] ** 2 + x[None, :] ** 2
+        mask_ps = (np.sqrt(r2) <= 1.0) | (np.sqrt(r2) >= 1.2)
+        for R_rank in ranks:
+            fam = next(f for f in families if f["label"] == rank_to_lbl[R_rank])
+            K_cont = eval_components_profile(r2.ravel(), fam["components"]).reshape(r2.shape)
+            K_svd, K_uncon_w = optimize_discrete_disc_rank_r(R_px, R_rank, K_cont, tau=0.2, shell_isotropic=False)
+            _, K_iso_w = optimize_discrete_disc_rank_r(R_px, R_rank, K_cont, tau=0.2, shell_isotropic=True)
+            if R_px <= 16 and L + 1 > R_rank:
+                _, K_uncon_c = optimize_discrete_disc_rank_r(R_px, R_rank, K_svd, tau=0.2, shell_isotropic=False)
+                m_uw, m_uc = measure_kernel_anisotropy(K_uncon_w, R_px), measure_kernel_anisotropy(K_uncon_c, R_px)
+                K_uncon = K_uncon_c if m_uc["ripple"] < m_uw["ripple"] else K_uncon_w
+                # For shell_isotropic cold seed, project K_svd onto shell_iso x rank_R first if feasible
+                _, K_iso_c = optimize_discrete_disc_rank_r(R_px, R_rank, K_svd, tau=0.2, shell_isotropic=True)
+                m_iw, m_ic = measure_kernel_anisotropy(K_iso_w, R_px), measure_kernel_anisotropy(K_iso_c, R_px)
+                K_iso = K_iso_c if (m_ic["shell_aniso"] <= 4e-4 and m_ic["ripple"] < m_iw["ripple"]) else K_iso_w
+            else:
+                K_uncon, K_iso = K_uncon_w, K_iso_w
+            conv_rows.append({
+                "radius_px": R_px,
+                "even_dim": L + 1,
+                "rank_R": R_rank,
+                "cont_rip": measure_kernel_anisotropy(K_cont, R_px)["ripple"],
+                "svd_rip": measure_kernel_anisotropy(K_svd, R_px)["ripple"],
+                "svd_aniso": measure_kernel_anisotropy(K_svd, R_px)["shell_aniso"],
+                "uncon_rip": measure_kernel_anisotropy(K_uncon, R_px)["ripple"],
+                "uncon_aniso": measure_kernel_anisotropy(K_uncon, R_px)["shell_aniso"],
+                "iso_rip": measure_kernel_anisotropy(K_iso, R_px)["ripple"],
+                "iso_aniso": measure_kernel_anisotropy(K_iso, R_px)["shell_aniso"],
+                "iso_vs_cont_ps_max": float(np.max(np.abs(K_iso[mask_ps] - K_cont[mask_ps]))),
+            })
+
+    # Warm-start vs cold-start iteration trajectories across small and large stencils
+    warmstart_traces = []
+    for R_px, R_rank in [(6, 4), (25, 4), (25, 8), (25, 12)]:
+        L = math.ceil(1.2 * R_px)
+        x = np.arange(-L, L + 1, dtype=np.float64) / R_px
+        r2 = x[:, None] ** 2 + x[None, :] ** 2
+        fam = next(f for f in families if f["label"] == rank_to_lbl[R_rank])
+        K_cont = eval_components_profile(r2.ravel(), fam["components"]).reshape(r2.shape)
+        tr = trace_discrete_warmstart(R_px, R_rank, K_cont, tau=0.2)
+        warmstart_traces.append(tr)
+        w500 = tr["shell_iso"]["warm_cont"][-1]["obj"]
+        c500 = tr["shell_iso"]["cold_svd_rc"][-1]["obj"]
+        print(f"WarmStart trace R_px={R_px:2d}, R={R_rank:2d} (500 SVDs, shell_iso obj): Warm={w500:.5f} vs Cold(SVD-rc)={c500:.5f}")
+
+    return {
+        "summary": rows,
+        "kernels_R4": saved_kernels,
+        "radius_convergence": conv_rows,
+        "warmstart_trajectories": warmstart_traces,
+    }
 
 
 def normalized_half_stencils(R_px: int, components):
@@ -877,11 +1046,26 @@ def rerun_gpu_benchmark():
     print(f"\nUpdated GPU benchmark in {RESULTS_PATH}")
 
 
+def rerun_discrete_vs_continuous():
+    """Rerun only the discrete-vs-continuous convergence and warm-start analysis and update stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    print("\n=== Discrete vs Continuous Convergence & Warm-Start Analysis ===")
+    results["discrete_vs_continuous"] = evaluate_discrete_vs_continuous(results["families"])
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated discrete_vs_continuous in {RESULTS_PATH}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU throughput benchmark")
-    if parser.parse_args().gpu_only:
+    parser.add_argument("--discrete-only", action="store_true", help="rerun only the discrete-vs-continuous analysis")
+    args = parser.parse_args()
+    if args.gpu_only:
         return rerun_gpu_benchmark()
+    if args.discrete_only:
+        return rerun_discrete_vs_continuous()
 
     s2, tgt2, _, _ = make_disc_grid(tau=0.2, dim_corner=2, n_pass=1000, n_stop=1000)
     s3, tgt3, _, _ = make_disc_grid(tau=0.2, dim_corner=3, n_pass=1000, n_stop=1000)

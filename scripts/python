@@ -5,14 +5,32 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 export MPLCONFIGDIR="$tmp/cache/matplotlib"
 export UV_CACHE_DIR="$tmp/cache/uv"
+export UV_PYTHON_INSTALL_DIR="$tmp/cache/uv-python"
 export PYTHONPYCACHEPREFIX="$tmp/cache/pycache"
 export TRITON_DEFAULT_FP_FUSION=1
 export TRITON_CACHE_DIR="$tmp/cache/triton"
-mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR" "$PYTHONPYCACHEPREFIX"
+mkdir -p "$MPLCONFIGDIR" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$PYTHONPYCACHEPREFIX"
 
 if [ ! -x "$tmp/venv/bin/python" ]; then
-  uv venv --python /usr/bin/python3 "$tmp/venv" >&2
-  uv pip install --python "$tmp/venv/bin/python" numpy scipy matplotlib torch >&2
+  if command -v uv >/dev/null 2>&1; then
+    uv_bin="$(command -v uv)"
+  else
+    uv_bin="$tmp/bin/uv"
+    uv_ver="0.13.8"
+    if [ ! -x "$uv_bin" ]; then
+      mkdir -p "$tmp/bin"
+      arch="$(uname -m)"
+      curl -fsSL \
+        "https://github.com/astral-sh/uv/releases/download/${uv_ver}/uv-${arch}-unknown-linux-musl.tar.gz" \
+        | tar -xz --strip-components=1 -C "$tmp/bin" >&2
+    fi
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    "$uv_bin" venv --python "$(command -v python3)" "$tmp/venv" >&2
+  else
+    "$uv_bin" venv --python 3.12 "$tmp/venv" >&2
+  fi
+  "$uv_bin" pip install --python "$tmp/venv/bin/python" -r "$repo/Applications/requirements.txt" >&2
 fi
 
 exec "$tmp/venv/bin/python" -u "$@"

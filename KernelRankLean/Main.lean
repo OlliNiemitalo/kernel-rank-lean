@@ -160,7 +160,7 @@ theorem separableRank_radial_gaussian_eq_iff {d : ℕ} (hd : 2 ≤ d) (φ : ℝ 
 
 /-! ### General `d`-D border-rank bound and exact-vs.-border rank separation -/
 
-private lemma abs_exp_sub_one_sub_le (y : ℝ) :
+lemma abs_exp_sub_one_sub_le (y : ℝ) :
     |Real.exp y - 1 - y| ≤ y ^ 2 * Real.exp |y| := by
   have hconv : Convex ℝ (Set.Icc (-|y|) |y|) := convex_Icc _ _
   have hy_mem : y ∈ Set.Icc (-|y|) |y| := ⟨neg_abs_le y, le_abs_self y⟩

@@ -1,0 +1,8 @@
+# Python dependencies for Applications/ (installed automatically into .tmp/venv by scripts/python).
+# Reference versions used for the paper's RTX 4070 Ti Super run:
+#   Python 3.14.4, numpy==2.5.4, scipy==1.18.1, matplotlib==3.11.2, torch==2.15.0 (CUDA 13.2), triton==3.9.0
+numpy
+scipy
+matplotlib
+torch
+triton

@@ -552,6 +552,10 @@ def make_discrete_vs_continuous_figure(app_dir: str, paper_dir: str, preview_dir
     gs = fig.add_gridspec(3, 4, height_ratios=[1.0, 1.0, 1.28], hspace=0.44, wspace=0.20,
                           left=0.055, right=0.988, top=0.935, bottom=0.075)
 
+    def pixelate_exact(img_arr: np.ndarray, scale: int) -> np.ndarray:
+        """Upsample by an exact integer factor so PDF viewers render crisp, uniform square pixels."""
+        return np.repeat(np.repeat(img_arr, scale, axis=0), scale, axis=1)
+
     for c_idx, (key, title) in enumerate(cols):
         m6 = summary[(6, 4)][key]
         m25 = summary[(25, 4)][key]
@@ -559,13 +563,13 @@ def make_discrete_vs_continuous_figure(app_dir: str, paper_dir: str, preview_dir
         # Row 0: Small stencil R_px = 6 (W = 17) rendered sRGB bokeh (moderate + 12x HDR star)
         ax0 = fig.add_subplot(gs[0, c_idx])
         im6 = render_two_star_bokeh(ker6[key], 6)
-        ax0.imshow(im6, origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
+        ax0.imshow(pixelate_exact(im6, 16), origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="none")
         ax0.set_xticks([])
         ax0.set_yticks([])
         ax0.set_title(
             f"{title}\n"
-            f"$R_{{\\mathrm{{px}}}}={{6}}$: rip ${m6['ripple']:.4f}$, aniso ${m6['shell_aniso']:.3f}$",
-            fontsize=8.3, pad=4,
+            f"$R_{{\\mathrm{{px}}}}={{6}}$: rip ${m6['ripple']:.5f}$, aniso ${m6['shell_aniso']:.6f}$",
+            fontsize=7.65, pad=4,
         )
         if c_idx == 0:
             ax0.set_ylabel("Small ($R_{\\mathrm{px}}{=}6, W{=}17$)\n1x + 12x stars (sRGB)", fontsize=8.0)
@@ -573,12 +577,12 @@ def make_discrete_vs_continuous_figure(app_dir: str, paper_dir: str, preview_dir
         # Row 1: Large stencil R_px = 25 (W = 61) rendered sRGB bokeh (moderate + 12x HDR star)
         ax1 = fig.add_subplot(gs[1, c_idx])
         im25 = render_two_star_bokeh(ker25[key], 25)
-        ax1.imshow(im25, origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="bilinear")
+        ax1.imshow(pixelate_exact(im25, 8), origin="lower", cmap="gray", vmin=0.0, vmax=1.0, interpolation="none")
         ax1.set_xticks([])
         ax1.set_yticks([])
         ax1.set_title(
-            f"$R_{{\\mathrm{{px}}}}={{25}}$: rip ${m25['ripple']:.4f}$, aniso ${m25['shell_aniso']:.3f}$",
-            fontsize=8.2, pad=3,
+            f"$R_{{\\mathrm{{px}}}}={{25}}$: rip ${m25['ripple']:.5f}$, aniso ${m25['shell_aniso']:.6f}$",
+            fontsize=7.65, pad=3,
         )
         if c_idx == 0:
             ax1.set_ylabel("Large ($R_{\\mathrm{px}}{=}25, W{=}61$)\n1x + 12x stars (sRGB)", fontsize=8.0)
@@ -642,6 +646,122 @@ def make_discrete_vs_continuous_figure(app_dir: str, paper_dir: str, preview_dir
     fig.savefig(pdf_path)
     if preview_dir:
         fig.savefig(os.path.join(preview_dir, "fig_discrete_vs_continuous.png"), dpi=220)
+    plt.close(fig)
+    print(f"Wrote {pdf_path}")
+
+
+def make_discrete_convergence_figure(app_dir: str, paper_dir: str, preview_dir: str | None = None):
+    """
+    Two-panel companion figure (`fig_discrete_convergence.pdf`):
+      (a) Convergence of discrete rank-R minimax pass/stopband ripple to our continuous
+          complex-Gaussian profiles as blur radius R_px grows from 3 to 64 across R in {2, 4, 8, 12};
+      (b) Warm-starting discrete minimax from sampled continuous complex Gaussians vs. cold starts
+          (raised-cosine SVD, hard-disc SVD, random rank-R) across small (R_px = 6) and large (R_px = 25) stencils.
+    """
+    with open(os.path.join(app_dir, "results_blur_2d.json"), "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    dvc = data["discrete_vs_continuous"]
+    conv = dvc["radius_convergence"]
+    traces = {(t["radius_px"], t["rank_R"]): t for t in dvc["warmstart_trajectories"]}
+
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(12.4, 3.85), constrained_layout=True)
+
+    # --- Panel (a): Radius convergence R_px in [3, 64] ---
+    rank_specs = [
+        (2, "#ff7f0e", "1c", r"$R{=}2$ ($1c$)"),
+        (4, "#1f77b4", "2c", r"$R{=}4$ ($2c$)"),
+        (8, "#2ca02c", "4c", r"$R{=}8$ ($4c$)"),
+        (12, "#d62728", "6c", r"$R{=}12$ ($6c$)"),
+    ]
+    zero_floor = 2.0e-6
+    for R_rank, col, short_c, lbl in rank_specs:
+        sub = sorted([r for r in conv if r["rank_R"] == R_rank], key=lambda r: r["radius_px"])
+        rpx = np.array([r["radius_px"] for r in sub], dtype=np.float64)
+        cont_val = sub[-1]["cont_rip"]
+        ax_a.axhline(cont_val, color=col, ls=":", lw=1.1, alpha=0.85)
+        ax_a.text(65.5, cont_val, f"{short_c}", color=col, fontsize=7.6, va="center", ha="left", fontweight="bold")
+
+        iso_raw = np.array([r["iso_rip"] for r in sub], dtype=np.float64)
+        pos_mask = iso_raw > 1e-8
+        disp_y = np.where(pos_mask, iso_raw, zero_floor)
+        ax_a.semilogy(rpx[pos_mask], iso_raw[pos_mask], "o-", color=col, lw=1.45, ms=4.3,
+                      label=f"Shell-iso. {lbl}")
+        if np.any(~pos_mask):
+            ax_a.plot(rpx[~pos_mask], disp_y[~pos_mask], "v", color=col, ms=4.5, mfc="white", mew=1.0, zorder=4)
+            last_z = int(np.where(~pos_mask)[0][-1])
+            if last_z + 1 < len(rpx):
+                ax_a.plot([rpx[last_z], rpx[last_z + 1]], [zero_floor, iso_raw[last_z + 1]],
+                          "--", color=col, lw=0.85, alpha=0.55)
+
+        if R_rank == 4:
+            uncon_raw = np.array([r["uncon_rip"] for r in sub], dtype=np.float64)
+            svd_raw = np.array([r["svd_rip"] for r in sub], dtype=np.float64)
+            ax_a.semilogy(rpx[pos_mask], uncon_raw[pos_mask], "^--", color="#0c4a6e", lw=1.1, ms=3.9, alpha=0.85,
+                          label=r"Unconstr. $R{=}4$ (anisotropic)")
+            ax_a.semilogy(rpx[pos_mask], svd_raw[pos_mask], "s-.", color="#6b7280", lw=1.05, ms=3.7, alpha=0.85,
+                          label=r"Direct $\ell_2$ SVD $R{=}4$ (r.-cos)")
+
+    ax_a.plot([], [], "v", color="#444444", ms=4.5, mfc="white", mew=1.0, label=r"Exact $0$ ($L{+}1 \leq R$)")
+    ax_a.axhline(zero_floor, color="#999999", ls="-", lw=0.5, alpha=0.45)
+    ax_a.set_xlim(2.0, 71.0)
+    ax_a.set_ylim(1.2e-6, 0.55)
+    ax_a.set_xticks([3, 6, 12, 16, 25, 36, 48, 64])
+    ax_a.set_xlabel(r"Discrete disc radius $R_{\mathrm{px}}$ [pixels] ($W = 2\lceil 1.2 R_{\mathrm{px}}\rceil + 1$)")
+    ax_a.set_ylabel(r"Pass/stopband ripple $\max |K - \mathbf{1}_{r \leq 1}|$")
+    ax_a.set_title(r"(a) Convergence of discrete minimax to continuous $n_{\mathrm{cx}}c$ profiles")
+    ax_a.grid(True, which="both", alpha=0.25, lw=0.5)
+    ax_a.legend(loc="lower right", frameon=True, framealpha=0.94, fontsize=6.75, ncol=2)
+
+    # --- Panel (b): Warm-start vs cold-start iteration trajectories ---
+    ax_b.set_xscale("symlog", linthresh=2.0)
+    ax_b.set_yscale("log")
+
+    def plot_trace_pair(rpx_v, r_v, col, lbl_prefix, show_hard=False):
+        t = traces[(rpx_v, r_v)]
+        ks = np.array(t["checkpoints"], dtype=np.float64)
+        w_obj = [pt["obj"] for pt in t["shell_iso"]["warm_cont"]]
+        c_obj = [pt["obj"] for pt in t["shell_iso"]["cold_svd_rc"]]
+        ax_b.plot(ks, w_obj, "o-", color=col, lw=1.55, ms=4.2, label=f"{lbl_prefix}: Warm (cont.)")
+        ax_b.plot(ks, c_obj, "s--", color=col, lw=1.2, ms=3.8, mfc="none", label=f"{lbl_prefix}: Cold (SVD r.-cos)")
+        if show_hard:
+            h_obj = [pt["obj"] for pt in t["shell_iso"]["cold_svd_hard"]]
+            ax_b.plot(ks, h_obj, "d:", color="#7f7f7f", lw=1.1, ms=3.6, label=f"{lbl_prefix}: Cold (SVD hard disc)")
+
+    plot_trace_pair(6, 4, "#2ca02c", r"$R_{\mathrm{px}}{=}6, R{=}4$")
+    plot_trace_pair(25, 4, "#1f77b4", r"$R_{\mathrm{px}}{=}25, R{=}4$")
+    plot_trace_pair(25, 8, "#9467bd", r"$R_{\mathrm{px}}{=}25, R{=}8$")
+    plot_trace_pair(25, 12, "#d62728", r"$R_{\mathrm{px}}{=}25, R{=}12$", show_hard=True)
+
+    ax_b.annotate(
+        r"Small $R_{\mathrm{px}}{=}6$: cold SVD" "\n" r"starts $3.5\times$ lower",
+        xy=(5, traces[(6, 4)]["shell_iso"]["cold_svd_rc"][2]["obj"]),
+        xytext=(0.18, 0.033),
+        arrowprops={"arrowstyle": "->", "lw": 0.75, "color": "#1b5e20"},
+        fontsize=6.85, bbox={"boxstyle": "round,pad=0.18", "fc": "#f4fbf4", "ec": "#b7deb8", "lw": 0.6},
+    )
+    ax_b.annotate(
+        r"Large $R_{\mathrm{px}}{=}25, R{=}12$: warm $6c$" "\n" r"starts $2.2\times$ lower at $k{=}0$",
+        xy=(0, traces[(25, 12)]["shell_iso"]["warm_cont"][0]["obj"]),
+        xytext=(12, 0.00042),
+        arrowprops={"arrowstyle": "->", "lw": 0.75, "color": "#8b1d1d"},
+        fontsize=6.85, bbox={"boxstyle": "round,pad=0.18", "fc": "#fff6f6", "ec": "#e2bcbc", "lw": 0.6},
+    )
+
+    ax_b.set_xlim(-0.2, 580)
+    ax_b.set_ylim(2.8e-4, 1.15)
+    ax_b.set_xticks([0, 2, 5, 10, 25, 50, 150, 500])
+    ax_b.set_xticklabels(["0", "2", "5", "10", "25", "50", "150", "500"])
+    ax_b.set_xlabel(r"Cumulative SVD rank-$R$ projections $k$")
+    ax_b.set_ylabel(r"Shell-isotropic error $\max(\mathrm{rip}, \|K - \mathcal{P}_{\mathrm{iso}}K\|_\infty)$", fontsize=8.8)
+    ax_b.set_title("(b) Warm start (sampled continuous) vs. cold starts")
+    ax_b.grid(True, which="both", alpha=0.25, lw=0.5)
+    ax_b.legend(loc="upper right", frameon=True, framealpha=0.92, fontsize=6.45, ncol=2)
+
+    pdf_path = os.path.join(paper_dir, "fig_discrete_convergence.pdf")
+    fig.savefig(pdf_path)
+    if preview_dir:
+        fig.savefig(os.path.join(preview_dir, "fig_discrete_convergence.png"), dpi=220)
     plt.close(fig)
     print(f"Wrote {pdf_path}")
 
@@ -775,6 +895,142 @@ def make_acoustics_3d_figure(app_dir: str, paper_dir: str, preview_dir: str | No
     print(f"Wrote {pdf_path}")
 
 
+def make_acoustics_hetero_figure(app_dir: str, paper_dir: str, preview_dir: str | None = None):
+    """
+    Spatially varying sound-speed 3-D wave propagation (`paper/fig_acoustics_hetero.pdf`):
+      (a) Worst-case 3-D directional phase-velocity error up to 0.75*pi vs. local Courant number nu(x);
+      (b) Refracted broadband waveforms behind the low-velocity acoustic focusing lens at 3-D oblique
+          receiver (14, 12, 10) (with inset at on-axis caustic focus (20, 0, 0));
+      (c-e) Mid-plane z = 0 wavefield slices at c_max * t = 45 dx comparing the 256^3 spectral PDE
+            reference, fourth-order 25-pt O(dx^4, dt^4) FDTD, and shared-rate Separable Rank-8.
+    """
+    with open(os.path.join(app_dir, "results_acoustics_3d.json"), "r", encoding="utf-8") as f:
+        het = json.load(f)["heterogeneous_lens"]
+
+    fig = plt.figure(figsize=(13.2, 6.75), constrained_layout=True)
+    gs = fig.add_gridspec(2, 6, height_ratios=[1.05, 1.0])
+
+    # --- Top-left (a): Phase-velocity error vs local Courant number nu(x) ---
+    ax_a = fig.add_subplot(gs[0, :3])
+    dc = het["dispersion_curves_vs_nu"]
+    nu_arr = np.array(dc["nu"], dtype=np.float64)
+
+    ax_a.axvspan(0.4125, 0.75, color="#e8f1fa", alpha=0.85, label=r"Acoustic lens range $\nu(\mathbf{x}) \in [0.41, 0.75]$")
+
+    def plot_masked(vals, col, ls, lw, lbl):
+        m = np.array([v is not None for v in vals], dtype=bool)
+        y = np.array([v if v is not None else np.nan for v in vals], dtype=np.float64)
+        ax_a.semilogy(nu_arr[m], y[m], color=col, ls=ls, lw=lw, label=lbl)
+        return nu_arr[m][-1], y[m][-1]
+
+    plot_masked(dc["iwb27"], "#ff7f0e", "--", 1.4, r"27-pt IWB ($R{=}1$ real Gaussian)")
+    x25_end, y25_end = plot_masked(dc["fdtd25"], "#8c564b", "-.", 1.45, r"25-pt $O(\Delta x^4,\Delta t^4)$ FDTD ($\nu \leq 1/\sqrt{3}$)")
+    xps_end, yps_end = plot_masked(dc["psfft"], "#9467bd", ":", 1.55, r"PS-FFT $O(\Delta t^2)$ Laplacian ($\nu \leq 0.368$)")
+    plot_masked(dc["rank8"], "#1f77b4", "-", 1.85, r"Shared-rate Separable Rank-8 ($2c{+}2r, W{=}13$)")
+
+    ax_a.axvline(1.0 / math.sqrt(3.0), color="#8c564b", ls=":", lw=0.9, alpha=0.75)
+    ax_a.plot([x25_end], [y25_end], "X", color="#8c564b", ms=5.5)
+    ax_a.text(1.0 / math.sqrt(3.0) + 0.008, 7.2, "25-pt\nunstable", color="#6e3f36", fontsize=6.9, va="top")
+
+    ax_a.axvline(2.0 / (math.sqrt(3.0) * math.pi), color="#9467bd", ls=":", lw=0.9, alpha=0.75)
+    ax_a.plot([xps_end], [yps_end], "X", color="#9467bd", ms=5.5)
+    ax_a.text(2.0 / (math.sqrt(3.0) * math.pi) + 0.008, 2.7, "PS-FFT\nunstable", color="#5e3c85", fontsize=6.9, va="top")
+
+    ax_a.axhline(0.20, color="#2ca02c", ls="--", lw=0.85, alpha=0.75)
+    ax_a.text(0.808, 0.218, r"$0.20\%$", color="#1b6e22", fontsize=7.2, ha="right", va="bottom", fontweight="bold")
+
+    ax_a.set_xlim(0.20, 0.82)
+    ax_a.set_ylim(0.08, 42.0)
+    ax_a.set_xlabel(r"Local Courant number $\nu(\mathbf{x}) = c(\mathbf{x})\Delta t / \Delta x$")
+    ax_a.set_ylabel(r"Max $|\delta c / c(\mathbf{x})|$ for $\|\mathbf{k}\|_2 \leq 0.75\pi$ [%]")
+    ax_a.set_title(r"(a) Local dispersion vs. spatially varying Courant number $\nu(\mathbf{x})$")
+    ax_a.grid(True, which="both", alpha=0.25, lw=0.5)
+    ax_a.legend(loc="lower left", bbox_to_anchor=(0.01, 0.14), frameon=True, framealpha=0.93, fontsize=6.9)
+
+    # --- Top-right (b): Refracted broadband waveforms behind 3-D lens ---
+    ax_b = fig.add_subplot(gs[0, 3:])
+    ref_d = het["reference_256cubed"]
+    sims = {s["name"]: s for s in het["lens_refraction_128cubed"]}
+    s_iwb = sims["27-pt IWB (nu_max=0.75)"]
+    s_25 = sims["25-pt O(dx^4,dt^4) FDTD (nu_max=0.54)"]
+    s_ps = sims["PS-FFT O(dt^2) Laplacian (nu_max=0.325)"]
+    s_r8 = sims["Shared-rate Separable Rank-8 (2c+2r, nu_max=0.75)"]
+
+    ax_b.plot(ref_d["t"], ref_d["traces"]["diag_3d"], color="#111111", lw=1.9,
+              label=r"Ref. $256^3$ spectral $O(\Delta t^4)$")
+    ax_b.plot(s_iwb["t"], s_iwb["traces"]["diag_3d"], "--", color="#ff7f0e", lw=1.1, alpha=0.9,
+              label=f"27-pt IWB ({s_iwb['n_steps']} steps, {100*s_iwb['rel_l2']['diag_3d']:.1f}%)")
+    ax_b.plot(s_25["t"], s_25["traces"]["diag_3d"], "-.", color="#8c564b", lw=1.15, alpha=0.92,
+              label=f"25-pt $O(\\Delta x^4,\\Delta t^4)$ ({s_25['n_steps']} steps, {100*s_25['rel_l2']['diag_3d']:.1f}%)")
+    ax_b.plot(s_ps["t"], s_ps["traces"]["diag_3d"], ":", color="#9467bd", lw=1.25, alpha=0.92,
+              label=f"PS-FFT $O(\\Delta t^2)$ ({s_ps['n_steps']} steps, {100*s_ps['rel_l2']['diag_3d']:.1f}%)")
+    ax_b.plot(s_r8["t"], s_r8["traces"]["diag_3d"], "o-", color="#1f77b4", lw=1.2, ms=2.4,
+              label=f"Shared Rank-8 ({s_r8['n_steps']} steps, {100*s_r8['rel_l2']['diag_3d']:.1f}%)")
+
+    ax_b.set_xlim(27.0, 62.0)
+    ax_b.set_xlabel(r"Scaled time $c_{\max} t / \Delta x$ [grid cells]")
+    ax_b.set_ylabel(r"Pressure $p(\mathbf{x}_{\mathrm{diag}}, t)$")
+    ax_b.set_title(r"(b) Refracted 3-D oblique waveform at $(14, 12, 10)\,\Delta x$")
+    ax_b.grid(True, alpha=0.25, lw=0.5)
+    ax_b.legend(loc="lower left", frameon=True, framealpha=0.92, fontsize=6.75)
+
+    # Inset showing full on-axis caustic focus pulse at (20, 0, 0) over the quiet lead-in region
+    ax_in = ax_b.inset_axes([0.045, 0.54, 0.34, 0.40])
+    ax_in.plot(ref_d["t"], ref_d["traces"]["focus_axis"], color="#111111", lw=1.35)
+    ax_in.plot(s_25["t"], s_25["traces"]["focus_axis"], "-.", color="#8c564b", lw=0.95, alpha=0.88)
+    ax_in.plot(s_r8["t"], s_r8["traces"]["focus_axis"], "o-", color="#1f77b4", lw=0.95, ms=1.8)
+    ax_in.set_xlim(44.0, 62.0)
+    ax_in.set_title(f"Focus $(20,0,0)$ ({100*s_r8['rel_l2']['focus_axis']:.0f}% vs {100*s_25['rel_l2']['focus_axis']:.0f}%)",
+                    fontsize=6.4, pad=2)
+    ax_in.tick_params(labelsize=6.1)
+    ax_in.grid(True, alpha=0.25, lw=0.4)
+
+    # --- Bottom row (c-e): Mid-plane z = 0 wavefield slices at c_max * t = 45 dx ---
+    snaps = het["snapshots_z0_ct45"]
+    snap_specs = [
+        ("Reference (256^3 spectral O(dt^4))", r"(c) Ref. $256^3$ spectral PDE ($c_{\max}t = 45\,\Delta x$)"),
+        ("25-pt O(dx^4,dt^4) FDTD (nu_max=0.54)", r"(d) 25-pt $O(\Delta x^4,\Delta t^4)$ FDTD ($\nu_{\max}{=}0.54$)"),
+        ("Shared-rate Separable Rank-8 (2c+2r, nu_max=0.75)", r"(e) Shared-rate Rank-8 ($2c{+}2r, W{=}13, \nu_{\max}{=}0.75$)"),
+    ]
+    arr_ref = np.array(snaps["Reference (256^3 spectral O(dt^4))"], dtype=np.float64)
+    vmax = 0.50 * float(np.max(np.abs(arr_ref)))
+    extent = [-56.5, 56.5, -56.5, 56.5]
+    th = np.linspace(0.0, 2.0 * math.pi, 240)
+
+    im = None
+    for idx_s, (skey, stitle) in enumerate(snap_specs):
+        ax_s = fig.add_subplot(gs[1, 2 * idx_s : 2 * idx_s + 2])
+        arr = np.array(snaps[skey], dtype=np.float64).T
+        arr_up = np.repeat(np.repeat(arr, 4, axis=0), 4, axis=1)
+        im = ax_s.imshow(arr_up, origin="lower", extent=extent, cmap="RdBu_r", vmin=-vmax, vmax=vmax, interpolation="none")
+        # Overlay low-velocity Gaussian lens 1/e radius r = 14 dx (and inner core r = 7 dx)
+        ax_s.plot(14.0 * np.cos(th), 14.0 * np.sin(th), "--", color="#1b6e22", lw=1.0, alpha=0.85)
+        ax_s.plot(7.0 * np.cos(th), 7.0 * np.sin(th), ":", color="#1b6e22", lw=0.85, alpha=0.75)
+        # Source (-20, 0) and receivers (20, 0), (16, 14)
+        ax_s.plot([-20.0], [0.0], "*", color="#111111", ms=5.8, mec="white", mew=0.4)
+        ax_s.plot([20.0, 16.0], [0.0, 14.0], "^", color="#111111", ms=4.2, mfc="#ffd700", mec="#111111", mew=0.6)
+        if idx_s == 0:
+            ax_s.text(0.0, -17.5, r"Slow lens ($0.55\,c_{\max}$)", color="#1b6e22", fontsize=6.9, ha="center", va="top",
+                      bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.78})
+        ax_s.set_title(stitle, fontsize=9.1)
+        ax_s.set_xlabel(r"$x / \Delta x$")
+        if idx_s == 0:
+            ax_s.set_ylabel(r"$y / \Delta x$")
+        else:
+            ax_s.set_yticklabels([])
+        ax_s.set_xticks([-40, -20, 0, 20, 40])
+        ax_s.set_yticks([-40, -20, 0, 20, 40])
+
+    fig.colorbar(im, ax=fig.axes[2:], shrink=0.86, pad=0.015, label=r"Pressure $p(x, y, 0, t)$")
+
+    pdf_path = os.path.join(paper_dir, "fig_acoustics_hetero.pdf")
+    fig.savefig(pdf_path)
+    if preview_dir:
+        fig.savefig(os.path.join(preview_dir, "fig_acoustics_hetero.png"), dpi=200)
+    plt.close(fig)
+    print(f"Wrote {pdf_path}")
+
+
 def main():
     import sys
     configure_style()
@@ -785,7 +1041,9 @@ def main():
     make_overview_pipeline_figure(app_dir, paper_dir, preview_dir=preview_dir)
     make_blur_2d_figure(app_dir, paper_dir, preview_dir=preview_dir)
     make_discrete_vs_continuous_figure(app_dir, paper_dir, preview_dir=preview_dir)
+    make_discrete_convergence_figure(app_dir, paper_dir, preview_dir=preview_dir)
     make_acoustics_3d_figure(app_dir, paper_dir, preview_dir=preview_dir)
+    make_acoustics_hetero_figure(app_dir, paper_dir, preview_dir=preview_dir)
 
 
 if __name__ == "__main__":

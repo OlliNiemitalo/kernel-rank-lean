@@ -71,7 +71,31 @@ and any dimension `d ≥ 2`:
    and replacing `s` inside each `P(s)` by `(exp(h s) - 1) / h` constructs multi-Gaussian radial
    kernels of real rank at most `borderTotalCost d cs` converging uniformly on every compact set
    `C ⊆ ℝ^d` as `h → 0` (`h ≠ 0`). In particular, `‖x‖² cos(‖x‖²)` has exact complex rank `2 d`,
-   exact real rank `3 d - 2`, and compact-open real border rank at most `2 d`.
+   exact real rank `3 d - 2`, and radial multi-Gaussian border rank at most `2 d`.
+
+5. **Exact complex/3-D border ranks and universal approximation ([Approximation.lean](KernelRankLean/Approximation.lean)):**
+   * **Exact complex border rank (`sum_natDegree_add_one_le_of_tendsto_radial_complex`,
+     `exists_rank_le_sum_natDegree_add_one_tendstoUniformlyOn_radial_complex`) and 2-D slice
+     lower bound (`separableRank_fin2_le_of_tendsto`, `totalCost_le_of_tendsto_radial_profile`):**
+     two-variable separable rank is closed under pointwise convergence over any Hausdorff
+     topological field, giving exact pointwise and compact-open complex border rank
+     `∑ μ ∈ S, (deg P_μ + 1)` in all dimensions `d ≥ 2` and real border-rank lower bound
+     `totalCost cs`.
+   * **Strict non-sharpness of `borderTotalCost` over `ℝ` in `d = 3`
+     (`not_exists_rank_le_two_tendsto_radial_cos`,
+     `not_exists_rank_le_four_tendsto_radial_sq_mul_cos`,
+     `exists_rank_le_five_tendstoUniformlyOn_radial_sq_mul_cos`):** the polynomial adjugate
+     trace invariant `0 ≤ trace((adjugate S₀ * S₁)²)` proves that `cos(‖x‖²)` on `ℝ³` has exact
+     pointwise and compact-open real border rank `3 = borderTotalCost 3`, whereas `‖x‖² cos(‖x‖²)`
+     on `ℝ³` has exact pointwise and compact-open real border rank `5 < borderTotalCost 3 = 6 < 7`
+     (strictly separating complex border rank `4`, real border rank `5`, radial multi-Gaussian
+     border rank / exact complex rank `6`, and exact real rank `7`).
+   * **Equal-width harmonic complex-Gaussian universal approximation
+     (`exists_harmonic_gaussian_uniform_approx`):** for every continuous `ψ : ℝ → ℝ` on `[0, ∞)`
+     with `lim_{s → ∞} ψ(s) = 0`, every shared decay parameter `α > 0`, and every `ε > 0`, there
+     exist `ω₀ > 0`, `M : ℕ`, `a₀ : ℝ`, and `a : Fin M → ℂ` such that
+     `x ↦ a₀ exp(-α ‖x‖²) + ∑_{m=1}^M Re(a_m exp((-α + i m ω₀) ‖x‖²))` has `d`-way real rank
+     `≤ 1 + d M` and approximates `ψ(‖x‖²)` within `ε` uniformly across *all* `x ∈ ℝ^d`.
 
 The proof in the `KernelRankLean` library is complete (no `sorry`); `#print axioms` reports
 only `propext`, `Classical.choice` and `Quot.sound`. The separate `Experiments` library and the
@@ -174,7 +198,12 @@ complex rates `λ = -α + i β` (`α > 0`) contribute damped radial oscillations
   propagation at `1.44 ms/step` is dispersion-free on homogeneous obstacle-free boxes, against
   `1.51 ms/step` for the `R = 7` separable step in `float32` and `1.09 ms/step` with `float16`
   intermediates),
-  while half-sample even reflection enforces exact rigid-wall Neumann boundary conditions.
+  while half-sample even reflection enforces exact rigid-wall Neumann boundary conditions, and in
+  *spatially varying media* `c(x)` (such as seismic velocity gradients, transcranial/soft-tissue
+  ultrasound, and ocean sound channels, where 1-step `cuFFT` `k`-space propagation is
+  inapplicable) fixing shared Gaussian rates (`R = 8`, `W = 13`) with local polynomial weights
+  `γ_u(ν(x))` maintains `≤ 0.185%` isotropic phase-velocity error across a `2.3:1` Courant range
+  `ν ∈ [0.35, 0.80]`.
 * **Radial Green's functions and Gaussian-type orbitals.** Representing radial kernels such as
   Coulomb `1 / r`, Yukawa `exp(-κ r) / r`, and oscillatory Helmholtz `exp(i k r) / r` kernels as
   sums of real or complex Gaussians turns non-separable 3-D convolution and multi-center
@@ -208,6 +237,7 @@ The proof is in [KernelRankLean](KernelRankLean):
 | `MultiComplexRank.lean` | Exact `d`-way complex exponential-polynomial rank `∑ i, ((d - 1) deg Pᵢ + 1)` |
 | `MultiRealRank.lean` | Root-of-unity & real Lagrange decompositions; exact `d`-way real rank `multiTotalCost d cs` |
 | `Main.lean` | The `d`-D and 2-D main theorems and the general `d`-D multi-Gaussian border-rank theorem |
+| `Approximation.lean` | Exact complex border rank, 3-D real border rank `5 < B_3 = 6` on `‖x‖² cos(‖x‖²)`, and harmonic Gaussian universal approximation |
 
 Outside the proof:
 
@@ -245,7 +275,8 @@ size, not mathematical complexity.
 | [`6aabb4d`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/6aabb4df4788c60673e493bce13662167e599915) | Extend to `d` dimensions (`d ≥ 2`): unified multi-way separability, exact `d`-D complex rank, and exact `d`-D real multi-Gaussian rank | 3,822 | 3,537 | +2,235 |
 | [`9722ff5`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/9722ff5b2e2f788874a99378165af2206f0d7d42) | Prove exact `d`-D real radial rank for arbitrary polynomial degrees (`MultiRealRank.lean`), deleting superseded `Sufficiency.lean` and `MultiGaussian.lean` | 5,324 | 5,021 | +1,502 |
 | [`1094bf1`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/1094bf1b76f37fb62e78bc35461b50f50230a81a) | Prove exact vs. compact-open border rank separation (`3 d - 2` vs. `≤ 2 d`) on `‖x‖² cos(‖x‖²)` in `Main.lean` | 5,578 | 5,267 | +254 |
-| This revision | Prove general `d`-D multi-Gaussian border-rank bound `borderTotalCost d cs` for all radial exponential-polynomial representations (`Defs.lean`, `Main.lean`) | 5,750 | 5,432 | +172 |
+| [`94a5b4a`](https://github.com/OlliNiemitalo/kernel-rank-lean/commit/94a5b4a2696504e58148d7e823879d247f1557a8) | Prove general `d`-D multi-Gaussian border-rank bound `borderTotalCost d cs` for all radial exponential-polynomial representations (`Defs.lean`, `Main.lean`) | 5,750 | 5,432 | +172 |
+| This revision | Prove exact complex border rank, 3-D real border rank `5 < B_3 = 6` on `‖x‖² cos(‖x‖²)`, and equal-width harmonic Gaussian universal approximation (`Approximation.lean`) | 6,910 | 6,563 | +1,160 |
 
 Deltas compare consecutive rows (the commits between `cae13d6` and `6aabb4d` only touch
 `Experiments` and `Isabelle`). Through `240dea0`, the 2-D proof is **30 physical lines and 25
@@ -272,12 +303,14 @@ complex exponential polynomials and real multi-Gaussians (3,822 physical lines, 
 [MultiRealRank.lean](KernelRankLean/MultiRealRank.lean) (2,562 physical lines), proving the
 exact `d`-way real radial rank `multiTotalCost d cs` for arbitrary polynomial degrees and all
 `d ≥ 2` (5,324 physical lines, 5,021 nonblank). `1094bf1` adds the exact-vs.-border rank
-separation on `‖x‖² cos(‖x‖²)` (5,578 physical lines, 5,267 nonblank), and this revision
-generalizes that construction to every list of well-formed components via `borderTotalCost d cs`
-(`multiTotalCost_eq_borderTotalCost_add`,
-`exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`), bringing `KernelRankLean`
-to **5,750 physical lines and 5,432 nonblank lines** (+172 physical lines and +165 nonblank
-lines over `1094bf1`).
+separation on `‖x‖² cos(‖x‖²)` (5,578 physical lines, 5,267 nonblank), `94a5b4a` generalizes
+the multi-Gaussian border-rank bound `borderTotalCost d cs` to every list of well-formed
+components (5,750 physical lines, 5,432 nonblank), and this revision adds
+[Approximation.lean](KernelRankLean/Approximation.lean) (1,159 physical lines), establishing
+2-D pointwise border-rank closure, exact complex border rank in all dimensions, exact 3-D real
+border rank `5 < borderTotalCost 3 = 6` on `‖x‖² cos(‖x‖²)`, and uniform approximation on `ℝ^d`
+by equal-width harmonic complex Gaussians, bringing `KernelRankLean` to **6,910 physical lines
+and 6,563 nonblank lines** (+1,160 physical lines and +1,131 nonblank lines over `94a5b4a`).
 
 ## Alternative proofs of the semigroup step
 

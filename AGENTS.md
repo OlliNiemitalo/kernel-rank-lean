@@ -21,14 +21,18 @@
   proofs" below).
 - `Applications/`: reproducible Python/SciPy/PyTorch/Triton numerical optimization, simulation,
   and GPU benchmark scripts (`blur_2d.py`, `acoustics_3d.py`, `generate_figures.py`, JSON
-  results) accompanying Section 6 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
+  results) accompanying Section 5 of the paper; run via `scripts/python` (which keeps `.tmp/venv`
   and all Matplotlib/`uv`/Triton caches inside `.tmp/`). `gpu_kernels.py` holds the GPU
   implementations (separable, direct, `cuFFT`) used by both scripts; see "GPU benchmarks" below.
-  `--gpu-only` on either script reruns only its GPU parts from the stored optimization results.
+  `--gpu-only` on either script reruns only its GPU parts from the stored optimization results;
+  `--discrete-only` on `blur_2d.py` reruns only discrete-vs.-continuous convergence and warm-start
+  analyses; `--hetero-only` on `acoustics_3d.py` reruns only the spatially varying $c(\mathbf{x})$
+  experiment.
 - `paper/`: LaTeX source (`main.tex`), vector figures (`fig_overview_pipeline.pdf`,
-  `fig_blur_2d.pdf`, `fig_acoustics_3d.pdf`), compiled PDF (`main.pdf`), and metadata
-  (`metadata.json`) for the aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper`
-  (static Tectonic in `.tmp/bin`) and submitted/updated via `scripts/submit-aixiv` (reads
+  `fig_blur_2d.pdf`, `fig_discrete_vs_continuous.pdf`, `fig_discrete_convergence.pdf`,
+  `fig_acoustics_3d.pdf`, `fig_acoustics_hetero.pdf`), compiled PDF (`main.pdf`), and metadata (`metadata.json`) for the
+  aiXiv preprint `aixiv.261111.000007`; built via `scripts/build-paper` (static Tectonic in
+  `.tmp/bin`) and submitted/updated via `scripts/submit-aixiv` (reads
   `AIXIV_GITHUB_COPILOT_TOKEN` from the environment; never commit tokens).
 - `scripts/`: tool wrappers, setup, paper scripts, and the check script; `.githooks/`: the
   pre-commit hook.
@@ -148,6 +152,15 @@
   (`multiTotalCost_eq_borderTotalCost_add`). Substituting `u_h(s) = (exp(h s) - 1) / h` into
   `P(s)` constructs multi-Gaussian kernels of real rank at most `borderTotalCost d cs` converging
   uniformly on compact sets (`exists_rank_le_borderTotalCost_tendstoUniformlyOn_radial_profile`).
+- Exact complex/3-D border ranks and universal approximation (`Approximation`, `d ≥ 2`):
+  Schur-complement minor induction proves pointwise closure of 2-D separable rank over Hausdorff
+  topological fields (`separableRank_fin2_le_of_tendsto`), yielding exact complex border rank
+  `∑ μ ∈ S, (deg P_μ + 1)` and real border-rank lower bound `totalCost cs`. On `ℝ³`, the global
+  polynomial sum-of-squares identity `0 ≤ trace((adjugate S₀ * S₁)²)` proves real border rank `3`
+  for `cos(‖x‖²)` and `≥ 5` for `‖x‖² cos(‖x‖²)`, matched by an explicit 5-term uniform limit
+  (`5 < borderTotalCost 3 = 6 < 7`). Periodic Fourier density on `AddCircle T` proves uniform
+  approximation across all of `ℝ^d` by equal-width harmonic complex Gaussians for any continuous
+  radial profile vanishing at infinity (`exists_harmonic_gaussian_uniform_approx`).
 
 ## Mathematics of the nonstandard proofs
 

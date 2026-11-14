@@ -1226,11 +1226,382 @@ def rerun_gpu_experiments():
     print(f"\nUpdated GPU results in {RESULTS_PATH}")
 
 
+def run_heterogeneous_lens_experiment(propagators):
+    """
+    3-D wave propagation in a spatially varying medium c(x) where 1-step cuFFT k-space propagation
+    is inapplicable:
+      1) Optimizes a shared-rate Rank-8 (2 fixed-phase complex + 2 real Gaussians, L=6, W=13,
+         exact 3-way real rank R = 3 + 3 + 1 + 1 = 8) basis with smooth polynomial local weights
+         gamma_u(nu(x)) = c_{u,1} nu^2 + c_{u,2} nu^4 + c_{u,3} nu^6 across nu in [0.35, 0.80];
+      2) Certifies phase-velocity error |dc/c(x)| and von Neumann bounds across nu in [0.35, 0.80];
+      3) Audits 1,000-step long-time stability on a 64^3 room across both a smooth 2:1 Gaussian lens
+         and a discontinuous 2:1 spherical jump;
+      4) Benchmarks 3-D broadband refraction through a low-velocity focusing lens on 128^3 against
+         a 2x grid-refined (256^3) fourth-order spectral Lax-Wendroff PDE reference.
+    """
+    prop075 = next(p for p in propagators if p["label"] == "Rank-7 (2c+1r, nu=0.75)")
+    L = 6
+    K_ray, kmag_ray, in_ray = build_ray_grid(40, k_cut_frac=0.75)
+    kp = kmag_ray[in_ray]
+
+    def build_fixed_phase_modes(theta, K_eval):
+        b1, c1, ph1, b2, c2, ph2, b3, b4 = theta
+        sp = [("c", 0, b1, c1), ("c", 0, b2, c2), ("r", 0, b3, 0.0), ("r", 0, b4, 0.0)]
+        B_raw, d2_raw, _ = basis_poly_pts(K_eval, L, sp)
+        B_m = np.column_stack([
+            math.cos(ph1) * B_raw[:, 0] + math.sin(ph1) * B_raw[:, 1],
+            math.cos(ph2) * B_raw[:, 2] + math.sin(ph2) * B_raw[:, 3],
+            B_raw[:, 4],
+            B_raw[:, 5],
+        ])
+        d2_m = np.array([
+            math.cos(ph1) * d2_raw[0] + math.sin(ph1) * d2_raw[1],
+            math.cos(ph2) * d2_raw[2] + math.sin(ph2) * d2_raw[3],
+            d2_raw[4],
+            d2_raw[5],
+        ])
+        return B_m, d2_m
+
+    def fit_poly_weights_for_modes(B_modes, d2_modes, K_all_modes, nus=(0.35, 0.45, 0.55, 0.65, 0.75, 0.80)):
+        n_m = B_modes.shape[1]
+        A_eq = np.zeros((3, 3 * n_m + 1))
+        b_eq = np.array([-2.0, 0.0, 0.0])
+        for q in range(3):
+            A_eq[q, q * n_m : (q + 1) * n_m] = d2_modes
+        ub_rows, ub_rhs = [], []
+        for nu in nus:
+            tgt = 2.0 * np.cos(nu * kp) - 2.0
+            denom = np.maximum(nu * kp * np.sin(np.maximum(nu * kp, 1e-4)), 1e-4)
+            Phi_p = np.hstack([(nu ** (2 * (q + 1))) * B_modes[in_ray] for q in range(3)])
+            w_scale = 1.0 / denom[:, None]
+            ub_rows.append(np.hstack([Phi_p * w_scale, -np.ones((Phi_p.shape[0], 1))]))
+            ub_rhs.append(tgt / denom)
+            ub_rows.append(np.hstack([-Phi_p * w_scale, -np.ones((Phi_p.shape[0], 1))]))
+            ub_rhs.append(-tgt / denom)
+            Phi_all = np.hstack([(nu ** (2 * (q + 1))) * K_all_modes for q in range(3)])
+            ub_rows.append(np.hstack([Phi_all, np.zeros((Phi_all.shape[0], 1))]))
+            ub_rhs.append(np.zeros(Phi_all.shape[0]))
+            ub_rows.append(np.hstack([-Phi_all, np.zeros((Phi_all.shape[0], 1))]))
+            ub_rhs.append(np.full(Phi_all.shape[0], 3.992))
+        c_obj = np.zeros(3 * n_m + 1)
+        c_obj[-1] = 1.0
+        bounds = [(-300.0, 300.0)] * (3 * n_m) + [(0.0, None)]
+        res = linprog(c_obj, A_ub=np.vstack(ub_rows), b_ub=np.concatenate(ub_rhs),
+                      A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
+        if not res.success:
+            return 1.0, None
+        return float(res.x[-1]), res.x[:-1].reshape(3, n_m).T
+
+    c0_p, c1_p = prop075["components"][0], prop075["components"][1]
+    th0 = np.array([
+        c0_p["b"], c0_p["c"], math.atan2(c0_p["coeffs"][0][1], c0_p["coeffs"][0][0]),
+        c1_p["b"], c1_p["c"], math.atan2(c1_p["coeffs"][0][1], c1_p["coeffs"][0][0]),
+        prop075["components"][2]["b"], 1.10,
+    ])
+
+    def obj_het(th):
+        if th[0] < 0.03 or th[1] < 0.03 or th[3] < 0.03 or th[4] < 0.03 or th[6] < 0.05 or th[7] < 0.05:
+            return 1.0
+        if max(th[0], th[3], th[6], th[7]) > 2.5 or max(th[1], th[4]) > 2.8:
+            return 1.0
+        Bm, d2m = build_fixed_phase_modes(th, K_ray)
+        err, C_mat = fit_poly_weights_for_modes(Bm, d2m, Bm)
+        return 1.0 if C_mat is None else err
+
+    res_nm = minimize(obj_het, th0, method="Nelder-Mead", options={"maxiter": 180, "xatol": 1e-3, "fatol": 1e-5})
+    th_best = res_nm.x if res_nm.fun < obj_het(th0) else th0
+    Bm_ray, d2m_ray = build_fixed_phase_modes(th_best, K_ray)
+    _, C_best = fit_poly_weights_for_modes(Bm_ray, d2m_ray, Bm_ray)
+
+    K_oct, kmag_oct, in_oct = build_octant_grid(49, k_cut_frac=0.75)
+    Bm_oct, _ = build_fixed_phase_modes(th_best, K_oct)
+    kp_o = kmag_oct[in_oct]
+    disp_table = []
+    for nu in [0.35, 0.45, 0.55, 0.65, 0.75, 0.80]:
+        g_nu = C_best @ np.array([nu**2, nu**4, nu**6])
+        M_oct = 2.0 + Bm_oct @ g_nu
+        pv_r8 = float(np.max(np.abs(np.arccos(np.clip(M_oct[in_oct] / 2.0, -1.0, 1.0)) / (nu * kp_o) - 1.0)))
+        M_iwb = evaluate_baseline_octant("iwb_27pt", nu, K_oct[in_oct], kp_o)
+        pv_iwb = float(np.max(np.abs(np.arccos(np.clip(M_iwb / 2.0, -1.0, 1.0)) / (nu * kp_o) - 1.0)))
+        pv_25 = None
+        if nu <= 1.0 / math.sqrt(3.0):
+            M_25 = evaluate_baseline_octant("fdtd_25pt_o4", nu, K_oct[in_oct], kp_o)
+            pv_25 = float(np.max(np.abs(np.arccos(np.clip(M_25 / 2.0, -1.0, 1.0)) / (nu * kp_o) - 1.0)))
+        pv_ps = None
+        if nu <= 2.0 / (math.sqrt(3.0) * math.pi):
+            M_ps = 2.0 - (nu**2) * (kp_o**2)
+            pv_ps = float(np.max(np.abs(np.arccos(np.clip(M_ps / 2.0, -1.0, 1.0)) / (nu * kp_o) - 1.0)))
+        disp_table.append({
+            "nu": nu, "rank8_pv_err": pv_r8, "M_min": float(M_oct.min()), "M_max": float(M_oct.max()),
+            "iwb27_pv_err": pv_iwb, "fdtd25_pv_err": pv_25, "psfft_pv_err": pv_ps,
+        })
+    disp_curves_nu = {"nu": [], "rank8": [], "iwb27": [], "fdtd25": [], "psfft": []}
+    for nu_v in np.linspace(0.20, 0.80, 61):
+        nu_f = float(round(nu_v, 4))
+        disp_curves_nu["nu"].append(nu_f)
+        if nu_f >= 0.35:
+            g_nu = C_best @ np.array([nu_f**2, nu_f**4, nu_f**6])
+            M_r8 = 2.0 + Bm_oct @ g_nu
+            pv_r8_c = 100.0 * float(np.max(np.abs(np.arccos(np.clip(M_r8[in_oct] / 2.0, -1.0, 1.0)) / (nu_f * kp_o) - 1.0)))
+        else:
+            pv_r8_c = None
+        disp_curves_nu["rank8"].append(pv_r8_c)
+        M_iwb_c = evaluate_baseline_octant("iwb_27pt", nu_f, K_oct[in_oct], kp_o)
+        disp_curves_nu["iwb27"].append(100.0 * float(np.max(np.abs(np.arccos(np.clip(M_iwb_c / 2.0, -1.0, 1.0)) / (nu_f * kp_o) - 1.0))))
+        if nu_f <= 1.0 / math.sqrt(3.0) + 1e-9:
+            M_25_c = evaluate_baseline_octant("fdtd_25pt_o4", min(nu_f, 1.0 / math.sqrt(3.0)), K_oct[in_oct], kp_o)
+            disp_curves_nu["fdtd25"].append(100.0 * float(np.max(np.abs(np.arccos(np.clip(M_25_c / 2.0, -1.0, 1.0)) / (min(nu_f, 1.0 / math.sqrt(3.0)) * kp_o) - 1.0))))
+        else:
+            disp_curves_nu["fdtd25"].append(None)
+        if nu_f <= 2.0 / (math.sqrt(3.0) * math.pi):
+            M_ps_c = 2.0 - (nu_f**2) * (kp_o**2)
+            disp_curves_nu["psfft"].append(100.0 * float(np.max(np.abs(np.arccos(np.clip(M_ps_c / 2.0, -1.0, 1.0)) / (nu_f * kp_o) - 1.0))))
+        else:
+            disp_curves_nu["psfft"].append(None)
+
+    # Build exact 8 rank-1 1-D channels on [-L, L]
+    b1, c1, ph1, b2, c2, ph2, b3, b4 = [float(v) for v in th_best]
+    comps_modes = [
+        [{"kind": "c", "deg": 0, "b": b1, "c": c1, "coeffs": [(math.cos(ph1), math.sin(ph1))]}],
+        [{"kind": "c", "deg": 0, "b": b2, "c": c2, "coeffs": [(math.cos(ph2), math.sin(ph2))]}],
+        [{"kind": "r", "deg": 0, "b": b3, "c": 0.0, "coeffs": [(1.0, 0.0)]}],
+        [{"kind": "r", "deg": 0, "b": b4, "c": 0.0, "coeffs": [(1.0, 0.0)]}],
+    ]
+    device = torch.device("cuda")
+    idx_full = np.abs(np.arange(-L, L + 1))
+    mode_channels = []
+    for cm in comps_modes:
+        fac_ex, _ = build_3d_separable_factors(L, cm)
+        ch_tensors = []
+        dc_sum = 0.0
+        for fx_h, fy_h, fz_h in fac_ex:
+            fx, fy, fz = fx_h[idx_full], fy_h[idx_full], fz_h[idx_full]
+            dc_sum += float(np.sum(fx) * np.sum(fy) * np.sum(fz))
+            ch_tensors.append((
+                torch.tensor(fx, device=device, dtype=torch.float32).view(1, 1, -1, 1, 1),
+                torch.tensor(fy, device=device, dtype=torch.float32).view(1, 1, 1, -1, 1),
+                torch.tensor(fz, device=device, dtype=torch.float32).view(1, 1, 1, 1, -1),
+            ))
+        mode_channels.append((ch_tensors, dc_sum))
+
+    def step_rank8_hetero(p_curr, p_prev, gamma_fields):
+        G = p_curr.shape[0]
+        ix = np.arange(-L, G + L)
+        ix = np.where(ix < 0, -1 - ix, np.where(ix >= G, 2 * G - 1 - ix, ix))
+        ix_t = torch.tensor(ix, device=device, dtype=torch.long)
+        x5 = p_curr[None, None]
+        px = x5[:, :, ix_t, :, :]
+        upd = torch.zeros_like(x5)
+        for u_idx, (ch_list, dc_sum) in enumerate(mode_channels):
+            acc = (-dc_sum) * x5
+            for fx, fy, fz in ch_list:
+                u = F.conv3d(px, fx)
+                v = F.conv3d(u[:, :, :, ix_t, :], fy)
+                acc = acc + F.conv3d(v[:, :, :, :, ix_t], fz)
+            upd = upd + gamma_fields[u_idx][None, None] * acc
+        return 2.0 * p_curr - p_prev + upd[0, 0]
+
+    # 1,000-step long-time stability check on smooth 2:1 Gaussian lens & sharp 2:1 jump (64^3 room)
+    G_st = 64
+    coords_st = torch.arange(G_st, device=device, dtype=torch.float32) - G_st // 2
+    xx_s, yy_s, zz_s = torch.meshgrid(coords_st, coords_st, coords_st, indexing="ij")
+    rr_s = torch.sqrt((xx_s - 6.0) ** 2 + yy_s**2 + zz_s**2)
+    nu_max_st = 0.76
+    stability_audit = {}
+    for s_lbl, nu_map in [
+        ("smooth_2to1_lens", nu_max_st * (1.0 - 0.50 * torch.exp(-(rr_s**2) / (12.0**2)))),
+        ("sharp_2to1_jump", torch.where(rr_s < 14.0, 0.50 * nu_max_st, nu_max_st)),
+    ]:
+        gammas_s = [
+            float(C_best[u, 0]) * (nu_map**2) + float(C_best[u, 1]) * (nu_map**4) + float(C_best[u, 2]) * (nu_map**6)
+            for u in range(4)
+        ]
+        p0_s = torch.exp(-((xx_s + 10.0) ** 2 + yy_s**2 + zz_s**2) / (2.5**2))
+        pp_s, pc_s = p0_s.clone(), p0_s.clone()
+        pk0 = float(torch.max(torch.abs(p0_s)).item())
+        max_pk = pk0
+        for _ in range(1000):
+            pn_s = step_rank8_hetero(pc_s, pp_s, gammas_s)
+            pp_s, pc_s = pc_s, pn_s
+            max_pk = max(max_pk, float(torch.max(torch.abs(pc_s)).item()))
+        fin_pk = float(torch.max(torch.abs(pc_s)).item())
+        stability_audit[s_lbl] = {"init_peak": pk0, "final_peak_1000": fin_pk, "max_peak_1000": max_pk}
+        print(f"  Hetero 1000-step stability [{s_lbl}]: init={pk0:.4f}, final={fin_pk:.4f}, max={max_pk:.4f}")
+
+    # 3-D Acoustic Focusing Lens refraction benchmark (128^3 vs 256^3 spectral O(dt^4) reference)
+    def make_c_ratio(X, Y, Z):
+        return 1.0 - 0.45 * torch.exp(-(X**2 + Y**2 + Z**2) / (14.0**2))
+
+    T_phys, T_snap, sigma0 = 62.0, 45.0, 1.50
+    src_pos = (-20.0, 0.0, 0.0)
+    recs_phys = {"focus_axis": (20.0, 0.0, 0.0), "off_axis": (16.0, 14.0, 0.0), "diag_3d": (14.0, 12.0, 10.0)}
+    c_at_src = float(make_c_ratio(torch.tensor(src_pos[0]), torch.tensor(src_pos[1]), torch.tensor(src_pos[2])).item())
+    snapshots_z0 = {}
+
+    G_ref = 256
+    x_ref = (torch.arange(G_ref, device=device, dtype=torch.float32) - G_ref // 2) * 0.5
+    Xr, Yr, Zr = torch.meshgrid(x_ref, x_ref, x_ref, indexing="ij")
+    c_ref = make_c_ratio(Xr, Yr, Zr)
+    kf_r = 2.0 * math.pi * torch.fft.fftfreq(G_ref, device=device, dtype=torch.float32)
+    kr_r = 2.0 * math.pi * torch.fft.rfftfreq(G_ref, device=device, dtype=torch.float32)
+    kxr, kyr, kzr = torch.meshgrid(kf_r, kf_r, kr_r, indexing="ij")
+    k2_ref = kxr**2 + kyr**2 + kzr**2
+    del kxr, kyr, kzr
+
+    dt_ref = 0.125 * 0.5
+    n_steps_ref = int(round(T_phys / dt_ref))
+    snap_step_ref = int(round(T_snap / dt_ref))
+    rr_src_ref = torch.sqrt((Xr - src_pos[0]) ** 2 + (Yr - src_pos[1]) ** 2 + (Zr - src_pos[2]) ** 2).cpu().numpy()
+    p_p = torch.tensor(exact_spherical_pulse_3d(rr_src_ref, 0.0, sigma0=sigma0), device=device, dtype=torch.float32)
+    p_c = torch.tensor(exact_spherical_pulse_3d(rr_src_ref, c_at_src * dt_ref, sigma0=sigma0), device=device, dtype=torch.float32)
+    rec_idx_ref = {k: (G_ref // 2 + int(round(px * 2)), G_ref // 2 + int(round(py * 2)), G_ref // 2 + int(round(pz * 2)))
+                   for k, (px, py, pz) in recs_phys.items()}
+    tr_ref = {k: [float(p_p[idx].item()), float(p_c[idx].item())] for k, idx in rec_idx_ref.items()}
+    t_ref = [0.0, dt_ref]
+    nu2_ref = (0.125 * c_ref) ** 2
+    c_ref_mid = G_ref // 2
+    for s in range(2, n_steps_ref + 1):
+        lap1 = nu2_ref * torch.fft.irfftn(-k2_ref * torch.fft.rfftn(p_c), s=p_c.shape)
+        lap2 = nu2_ref * torch.fft.irfftn(-k2_ref * torch.fft.rfftn(lap1), s=p_c.shape)
+        p_n = 2.0 * p_c - p_p + lap1 + (1.0 / 12.0) * lap2
+        p_p, p_c = p_c, p_n
+        t_ref.append(s * dt_ref)
+        for k, idx in rec_idx_ref.items():
+            tr_ref[k].append(float(p_c[idx].item()))
+        if s == snap_step_ref:
+            # Subsample [-56, 56] at integer coordinates (step 2 on dx_ref=0.5 grid)
+            sl_r = slice(c_ref_mid - 112, c_ref_mid + 113, 2)
+            snapshots_z0["Reference (256^3 spectral O(dt^4))"] = p_c[sl_r, sl_r, c_ref_mid].cpu().numpy().tolist()
+    t_ref = np.array(t_ref)
+    del Xr, Yr, Zr, p_p, p_c, nu2_ref, k2_ref
+
+    G_c = 128
+    x_c = (torch.arange(G_c, device=device, dtype=torch.float32) - G_c // 2) * 1.0
+    Xc, Yc, Zc = torch.meshgrid(x_c, x_c, x_c, indexing="ij")
+    c_c = make_c_ratio(Xc, Yc, Zc)
+    rr_src_c = torch.sqrt((Xc - src_pos[0]) ** 2 + (Yc - src_pos[1]) ** 2 + (Zc - src_pos[2]) ** 2).cpu().numpy()
+    rec_idx_c = {k: (G_c // 2 + int(round(px)), G_c // 2 + int(round(py)), G_c // 2 + int(round(pz)))
+                 for k, (px, py, pz) in recs_phys.items()}
+    kf_c = 2.0 * math.pi * torch.fft.fftfreq(G_c, device=device, dtype=torch.float32)
+    kr_c = 2.0 * math.pi * torch.fft.rfftfreq(G_c, device=device, dtype=torch.float32)
+    kxg, kyg, kzg = torch.meshgrid(kf_c, kf_c, kr_c, indexing="ij")
+    k2_c = kxg**2 + kyg**2 + kzg**2
+
+    def step_fdtd25_het(pc, pp, nuf):
+        ix = np.arange(-2, G_c + 2)
+        ix = np.where(ix < 0, -1 - ix, np.where(ix >= G_c, 2 * G_c - 1 - ix, ix))
+        it = torch.tensor(ix, device=device, dtype=torch.long)
+        P = pc[it, :, :][:, it, :][:, :, it]
+        sl, sm1, sp1, sm2, sp2 = slice(2, G_c + 2), slice(1, G_c + 1), slice(3, G_c + 3), slice(0, G_c), slice(4, G_c + 4)
+        sf = P[sp1, sl, sl] + P[sm1, sl, sl] + P[sl, sp1, sl] + P[sl, sm1, sl] + P[sl, sl, sp1] + P[sl, sl, sm1]
+        sa = P[sp2, sl, sl] + P[sm2, sl, sl] + P[sl, sp2, sl] + P[sl, sm2, sl] + P[sl, sl, sp2] + P[sl, sl, sm2]
+        se = (P[sp1, sp1, sl] + P[sp1, sm1, sl] + P[sm1, sp1, sl] + P[sm1, sm1, sl]
+              + P[sp1, sl, sp1] + P[sp1, sl, sm1] + P[sm1, sl, sp1] + P[sm1, sl, sm1]
+              + P[sl, sp1, sp1] + P[sl, sp1, sm1] + P[sl, sm1, sp1] + P[sl, sm1, sm1])
+        nu2, nu4 = nuf**2, nuf**4
+        c1_w = (8.0 / 3.0) * nu2 - 2.0 * nu4
+        c2_w = (nu4 - nu2) / 6.0
+        c11_w = (2.0 / 3.0) * nu4
+        w0_w = 2.0 - 3.0 * (c1_w + c2_w + c11_w)
+        return w0_w * pc + 0.5 * c1_w * sf + 0.5 * c2_w * sa + 0.25 * c11_w * se - pp
+
+    def step_iwb27_het(pc, pp, nuf):
+        ix = np.arange(-1, G_c + 1)
+        ix = np.where(ix < 0, -1 - ix, np.where(ix >= G_c, 2 * G_c - 1 - ix, ix))
+        it = torch.tensor(ix, device=device, dtype=torch.long)
+        f1 = torch.tensor([0.5, 1.0, 0.5], device=device, dtype=torch.float32)
+        u = F.conv3d(pc[None, None][:, :, it, :, :], f1.view(1, 1, 3, 1, 1))
+        v = F.conv3d(u[:, :, :, it, :], f1.view(1, 1, 1, 3, 1))
+        w = F.conv3d(v[:, :, :, :, it], f1.view(1, 1, 1, 1, 3))[0, 0]
+        nu2 = nuf**2
+        return (2.0 - 4.0 * nu2) * pc + 0.5 * nu2 * w - pp
+
+    lens_sim = []
+    for m_name, m_kind, nu_m in [
+        ("27-pt IWB (nu_max=0.75)", "iwb27", 0.75),
+        ("25-pt O(dx^4,dt^4) FDTD (nu_max=0.54)", "fdtd25", 0.54),
+        ("PS-FFT O(dt^2) Laplacian (nu_max=0.325)", "psfft", 0.325),
+        ("Shared-rate Separable Rank-8 (2c+2r, nu_max=0.75)", "rank8", 0.75),
+    ]:
+        dt_c = nu_m * 1.0
+        n_st = int(round(T_phys / dt_c))
+        pp = torch.tensor(exact_spherical_pulse_3d(rr_src_c, 0.0, sigma0=sigma0), device=device, dtype=torch.float32)
+        pc = torch.tensor(exact_spherical_pulse_3d(rr_src_c, c_at_src * dt_c, sigma0=sigma0), device=device, dtype=torch.float32)
+        nu_fc = nu_m * c_c
+        gammas_c = [
+            float(C_best[u, 0]) * (nu_fc**2) + float(C_best[u, 1]) * (nu_fc**4) + float(C_best[u, 2]) * (nu_fc**6)
+            for u in range(4)
+        ]
+        tr_c = {k: [float(pp[idx].item()), float(pc[idx].item())] for k, idx in rec_idx_c.items()}
+        tc = [0.0, dt_c]
+        c_mid = G_c // 2
+        sl_c = slice(c_mid - 56, c_mid + 57)
+        for s in range(2, n_st + 1):
+            if m_kind == "iwb27":
+                pn = step_iwb27_het(pc, pp, nu_fc)
+            elif m_kind == "fdtd25":
+                pn = step_fdtd25_het(pc, pp, nu_fc)
+            elif m_kind == "psfft":
+                pn = 2.0 * pc - pp + (nu_fc**2) * torch.fft.irfftn(-k2_c * torch.fft.rfftn(pc), s=pc.shape)
+            else:
+                pn = step_rank8_hetero(pc, pp, gammas_c)
+            t_prev_s, t_curr_s = (s - 1) * dt_c, s * dt_c
+            if t_prev_s < T_snap <= t_curr_s:
+                w_lin = (T_snap - t_prev_s) / dt_c
+                snap_arr = (1.0 - w_lin) * pc[sl_c, sl_c, c_mid] + w_lin * pn[sl_c, sl_c, c_mid]
+                snapshots_z0[m_name] = snap_arr.cpu().numpy().tolist()
+            pp, pc = pc, pn
+            tc.append(t_curr_s)
+            for k, idx in rec_idx_c.items():
+                tr_c[k].append(float(pc[idx].item()))
+        tc_arr = np.array(tc)
+        rel_l2 = {k: float(np.linalg.norm(np.array(tr_c[k]) - np.interp(tc_arr, t_ref, tr_ref[k])) /
+                           np.linalg.norm(np.interp(tc_arr, t_ref, tr_ref[k])))
+                  for k in recs_phys}
+        lens_sim.append({
+            "name": m_name, "nu_max": nu_m, "n_steps": n_st,
+            "rel_l2": rel_l2, "t": tc_arr.tolist(), "traces": tr_c,
+        })
+        print(f"  Lens {m_name:50s} ({n_st:3d} steps): focus={100*rel_l2['focus_axis']:5.1f}%, off={100*rel_l2['off_axis']:5.1f}%, diag={100*rel_l2['diag_3d']:5.1f}%")
+
+    return {
+        "rank_R": 8,
+        "L": L,
+        "W": 2 * L + 1,
+        "shared_modes_theta": [float(v) for v in th_best],
+        "poly_weight_matrix_nu2_nu4_nu6": C_best.tolist(),
+        "dispersion_vs_nu": disp_table,
+        "dispersion_curves_vs_nu": disp_curves_nu,
+        "stability_1000steps": stability_audit,
+        "reference_256cubed": {
+            "t": t_ref[::2].tolist(),
+            "traces": {k: np.array(v)[::2].tolist() for k, v in tr_ref.items()},
+        },
+        "lens_refraction_128cubed": lens_sim,
+        "snapshots_z0_ct45": snapshots_z0,
+    }
+
+
+def rerun_hetero_experiment():
+    """Run only the heterogeneous sound-speed experiment and update stored results."""
+    with open(RESULTS_PATH, encoding="utf-8") as f:
+        results = json.load(f)
+    print("\n=== 3-D Spatially Varying Sound-Speed c(x) Experiment ===")
+    results["heterogeneous_lens"] = run_heterogeneous_lens_experiment(results["propagators"])
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nUpdated heterogeneous_lens in {RESULTS_PATH}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--gpu-only", action="store_true", help="rerun only the GPU simulation, room test and benchmarks")
-    if parser.parse_args().gpu_only:
+    parser.add_argument("--hetero-only", action="store_true", help="rerun only the spatially varying sound-speed experiment")
+    args = parser.parse_args()
+    if args.gpu_only:
         return rerun_gpu_experiments()
+    if args.hetero_only:
+        return rerun_hetero_experiment()
 
     verify_iwb_is_single_real_gaussian()
 
@@ -1274,6 +1645,8 @@ def main():
     propagators = [optimize_and_certify_propagator(lbl, L, st, nu, kc, K_oct, kmag_oct) for lbl, L, st, nu, kc in configs]
 
     gpu_results = run_gpu_experiments(propagators)
+    print("\n=== 3-D Spatially Varying Sound-Speed c(x) Experiment ===")
+    hetero_lens = run_heterogeneous_lens_experiment(propagators)
     cpu_bench = benchmark_3d_cpu(G=128, L=6, R=7)
     disp_curves = compute_dispersion_curves(propagators)
 
@@ -1291,6 +1664,7 @@ def main():
                 "baselines": baselines,
                 "propagators": serializable_props,
                 **gpu_results,
+                "heterogeneous_lens": hetero_lens,
                 "cpu_benchmark_128cubed": cpu_bench,
                 "dispersion_curves": disp_curves,
             },
